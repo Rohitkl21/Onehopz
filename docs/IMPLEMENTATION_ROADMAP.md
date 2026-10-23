@@ -1,44 +1,64 @@
 # OneHopz — Implementation Roadmap & Delivery Plan
 
-**Document Version:** 1.1.0  
-**Status:** Approved Delivery Blueprint (Milestone 1.2 Finalized)  
-**Organization Structure:** Levels & Milestones (Strictly Milestone-Driven, No Arbitrary Week Estimates)  
+**Document Version:** 1.2.0  
+**Status:** Approved Delivery Blueprint (Milestone 1.7 Planning Reconciled)  
+**Organization Structure:** 8-Level Roadmap & Milestones (Strictly Milestone-Driven, No Arbitrary Week Estimates)  
 **Governance:** Strict Quality Gates with Mandatory Verification Evidence
 
 ---
 
-## 1. Roadmap Architecture: Levels & Milestones Overview
+## 1. Roadmap Architecture: 8-Level Framework & Milestones
+
+The delivery blueprint is organized across an **8-Level Roadmap**, reconciling core engine foundations, domain modules, financial operations, and jury demonstrations:
 
 ```
-LEVEL 1: ARCHITECTURE, FOUNDATION & CORE ENGINE
+LEVEL 1: ARCHITECTURE AND PROJECT FOUNDATION
   ├── Milestone 1.1: Master Product Requirements Specification [COMPLETED]
   ├── Milestone 1.2: Finalize System Architecture and Data Model [COMPLETED]
-  ├── Milestone 1.3: Development Environment and Repository Setup [COMPLETED]
+  └── Milestone 1.3: Development Environment and Repository Setup [COMPLETED]
+
+LEVEL 2: SHARED PLATFORM CORE
   ├── Milestone 1.4: Core Identity, RBAC & Multi-Tenant Merchant Model [COMPLETED]
   │     └── Milestone 1.4.1: Authentication Security Hardening [COMPLETED]
   ├── Milestone 1.5: Core Catalog, Offer Specifications & Inventory Domain [COMPLETED]
   │     └── Milestone 1.5.1: Catalog and Offer Security/Integrity Fixes [COMPLETED]
   ├── Milestone 1.6: Authoritative Hold Engine & ACID Concurrency Core [COMPLETED]
-  ├── Milestone 1.7: Payment Gateway Orchestrator & Escrow Webhook Pipeline [NEXT MILESTONE]
-  └── Milestone 1.8: MVP Category Implementations (Cinema, Restaurant, Surplus Food)
+  └── Core Orders & Order-Hold Conversion Engine [IN SCOPE: M1.7]
 
-LEVEL 2: ADVANCED VERTICALS & EXTERNAL ADAPTERS
+LEVEL 3: SEVEN BUSINESS MODULES
+  ├── Milestone 1.8a: Cinema Screens, Seat Grid & Showtimes
+  ├── Milestone 1.8b: Restaurant Tables, Dining Shifts & Covers
+  ├── Milestone 1.8c: Surplus Food Batches & Pickup Windows
   ├── Milestone 2.1: Hotel Room-Night & Inventory Calendar Module
   ├── Milestone 2.2: Salon Stylist Scheduling & Service Graph Module
   ├── Milestone 2.3: Event Tiering & Ticket Pass Generation Module
   └── Milestone 2.4: Travel Routing, PNR Engine & Mock Aggregator Adapter
 
-LEVEL 3: CROSS-MODULE INTEGRATION & JURY DEMONSTRATION SUITE
+LEVEL 4: PAYMENTS AND FINANCIAL OPERATIONS
+  ├── Milestone 1.7: Payment Gateway Orchestrator & Escrow Webhook Pipeline [NEXT MILESTONE]
+  │     ├── Gateway Adapters (Cashfree, Razorpay, MockGateway)
+  │     ├── HMAC-SHA256 Webhook Ingress & Idempotent Deduplication
+  │     ├── Double-Entry Immutable Append-Only Ledger (Triggers & Balances)
+  │     └── Automated Refund Saga for Orphaned Payments / Hold Expirations
+  └── Milestone 4.3: Merchant Settlement Batches, Tax Withholding (TCS/TDS) & Bank Payouts
+
+LEVEL 5: APPLICATIONS AND OPERATIONS
   ├── Milestone 3.1: Unified Customer Web Portal (Next.js Multi-Vertical Flow)
   ├── Milestone 3.2: Merchant Web Portal & Mobile-Responsive QR Scanner
-  ├── Milestone 3.3: Admin Portal, Settlement Dashboard & Reconciliation Ledger
-  └── Milestone 3.4: Jury Demonstration Suite & Synthetic Scenario Injector
+  └── Milestone 3.3: Admin Portal, Settlement Dashboard & Reconciliation Ledger
 
-LEVEL 4: PRODUCTION HARDENING, COMPLIANCE & COMMERCIAL LAUNCH
+LEVEL 6: INTEGRATIONS AND AUTOMATION
+  ├── Dynamic QR Digital Passes & TOTP Gate Redemption
+  ├── Transactional Messaging Outbox (SMS/Email/WhatsApp)
+  └── Live External GDS & Cinema POS Connectors
+
+LEVEL 7: SECURITY, RELIABILITY AND PERFORMANCE
   ├── Milestone 4.1: Security, Penetration Testing & DPDP Privacy Hardening
-  ├── Milestone 4.2: Payment Partner & Nodal Bank Certification
-  ├── Milestone 4.3: External Provider Adapters (Live GDS & Cinema POS)
   └── Milestone 4.4: High-Scale Concurrency Benchmarking & Production Launch
+
+LEVEL 8: DEPLOYMENT AND JURY DEMONSTRATION
+  ├── Milestone 3.4: Jury Demonstration Suite & Synthetic Scenario Injector
+  └── Milestone 4.2: Payment Partner & Nodal Bank Certification
 ```
 
 ---

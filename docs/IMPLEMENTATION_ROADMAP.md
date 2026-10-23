@@ -23,7 +23,7 @@ LEVEL 2: SHARED PLATFORM CORE
   ├── Milestone 1.5: Core Catalog, Offer Specifications & Inventory Domain [COMPLETED]
   │     └── Milestone 1.5.1: Catalog and Offer Security/Integrity Fixes [COMPLETED]
   ├── Milestone 1.6: Authoritative Hold Engine & ACID Concurrency Core [COMPLETED]
-  └── Core Orders & Order-Hold Conversion Engine [IN SCOPE: M1.7]
+  └── Milestone 1.7a: Core Orders, Checkout & Durable Inventory Reservations [COMPLETED]
 
 LEVEL 3: SEVEN BUSINESS MODULES
   ├── Milestone 1.8a: Cinema Screens, Seat Grid & Showtimes
@@ -35,7 +35,7 @@ LEVEL 3: SEVEN BUSINESS MODULES
   └── Milestone 2.4: Travel Routing, PNR Engine & Mock Aggregator Adapter
 
 LEVEL 4: PAYMENTS AND FINANCIAL OPERATIONS
-  ├── Milestone 1.7: Payment Gateway Orchestrator & Escrow Webhook Pipeline [NEXT MILESTONE]
+  ├── Milestone 1.7b: Payment Gateway Orchestrator & Escrow Webhook Pipeline [NEXT MILESTONE]
   │     ├── Gateway Adapters (Cashfree, Razorpay, MockGateway)
   │     ├── HMAC-SHA256 Webhook Ingress & Idempotent Deduplication
   │     ├── Double-Entry Immutable Append-Only Ledger (Triggers & Balances)
@@ -126,15 +126,39 @@ LEVEL 8: DEPLOYMENT AND JURY DEMONSTRATION
 - **Acceptance Criteria**: Concurrent requests competing for exclusive seats, quota capacity, or calendar nights yield strictly exact allocations and zero overbooking; duplicate idempotency keys return identical holds without double allocation.
 - **Verification Evidence**: 85 automated tests passing (100% pass rate) on live PostgreSQL 16.4; 0 ruff errors, 0 mypy issues across 80 source files.
 
-### Milestone 1.7: Payment Gateway Orchestrator & Escrow Webhook Pipeline
+### Milestone 1.7a: Core Orders, Checkout & Durable Inventory Reservations
+- **Status**: Completed & Verified.
 - **Prerequisites**: Milestone 1.6 complete.
 - **Deliverables**:
-  - `core.payments` module with gateway adapter interface.
+  - `apps.orders` Django application with core transactional models: `Order`, `OrderItem`, `OrderReservation`, and `CheckoutIdempotency`.
+  - Atomic conversion from active `Hold` (`ACTIVE` -> `CONVERTED_TO_ORDER`) to durable `OrderReservation` (`PENDING_PAYMENT`).
+  - Strict bounded payment deadline calculation per category (`min(created_at + 15m, category_cutoff)`):
+    - Cinema: Showtime start.
+    - Restaurant: Reservation dining time.
+    - Surplus Food: Pickup window end.
+    - Salon: Appointment service time.
+    - Hotel: Check-in date 15:00 UTC.
+    - Event: Event start time.
+    - Travel: Departure time (simulated adapter).
+  - Background & on-demand sweeping (`sweep_expired_order_reservations`, Celery task `sweep_expired_orders_task`) to reclaim abandoned reservations and release inventory back to the pool.
+  - Zero inventory theft during checkout: `Hold.is_expired` and inline inventory reclaims respect `CONVERTED_TO_ORDER` holds backed by active `OrderReservation`.
+  - REST endpoints: `POST /api/v1/orders/checkout` (idempotent, payload fingerprinting) and `GET /api/v1/orders/{order_id}` (multi-tenant RBAC).
+  - Zero double-conversion concurrency test suite proving race condition immunity across simultaneous threads on PostgreSQL 16.4.
+- **Dependencies**: Milestones 1.4, 1.5, 1.6.
+- **Acceptance Criteria**: Concurrent checkout attempts return identical order without duplicate orders or double reservations; hold expiration cannot reclaim inventory converted to order; expired order reservations are cleanly reclaimed without leaving ghost inventory locks.
+- **Verification Evidence**: 106 automated tests passing (100% pass rate) on live PostgreSQL 16.4; 0 ruff errors, 0 mypy issues across 85 source files.
+
+### Milestone 1.7b: Payment Gateway Orchestrator & Escrow Webhook Pipeline
+- **Status**: Next Milestone (Pending Authorization).
+- **Prerequisites**: Milestone 1.7a complete.
+- **Deliverables**:
+  - `apps.payments` module with gateway adapter interface.
   - Cashfree, Razorpay, and Mock gateway adapters.
   - HMAC webhook signature verification and idempotent deduplication table (`payment_attempts`).
-  - Double-entry ledger engine (`ledger_entries`) recording gross, fee, tax, and merchant payable.
-  - Automated refund saga for orphaned payments.
-- **Dependencies**: Milestone 1.6.
+  - Double-entry immutable append-only ledger engine (`ledger_entries`) recording gross, platform fee, GST, and merchant payable.
+  - State machine transition: `PENDING_PAYMENT` -> `CONFIRMED` upon payment success.
+  - Automated refund saga for orphaned payments, webhook timeouts, or expired order reservations.
+- **Dependencies**: Milestone 1.7a.
 - **Acceptance Criteria**: Duplicate webhook delivered 10 times results in single capture and single ledger balance; orphaned payment triggers automated refund.
 - **Verification Evidence**: Automated test execution trace proving idempotent handling and refund saga trigger.
 

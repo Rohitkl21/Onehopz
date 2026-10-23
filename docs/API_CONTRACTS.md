@@ -553,6 +553,53 @@ All state-modifying `POST`, `PUT`, or `PATCH` endpoints that trigger financial t
 }
 ```
 
+### 6.2 Retrieve Order Details
+- **Endpoint**: `GET /api/v1/orders/{order_id}`
+- **Auth**: Required (`CUSTOMER`, `MERCHANT_ADMIN`, `OUTLET_STAFF`, `PLATFORM_ADMIN`)
+- **Scoping**: Strictly scoped to order owner, authorized outlet staff / merchant members, or platform admins.
+- **Response (200 OK)**:
+```json
+{
+  "success": true,
+  "data": {
+    "id": "89012a67-0cbf-4e69-b50e-6f8d07e6005b",
+    "order_number": "OH-20261023-9912",
+    "status": "PENDING_PAYMENT",
+    "category": "CINEMA",
+    "merchant_id": "...",
+    "outlet_id": "...",
+    "gross_amount": "700.00",
+    "discount_amount": "350.00",
+    "platform_fee": "25.00",
+    "tax_amount": "4.50",
+    "net_payable_amount": "379.50",
+    "currency": "INR",
+    "cancellation_policy_type": "WINDOWED_REFUND",
+    "cancellation_deadline": "2026-10-23T18:15:00Z",
+    "payment_deadline": "2026-10-23T14:15:00Z",
+    "customer_contact": {
+      "name": "Arjun Mehta",
+      "email": "customer@example.com",
+      "phone": "+919876543210"
+    },
+    "items": [
+      {
+        "id": "...",
+        "offer_id": "...",
+        "catalog_item_id": "...",
+        "quantity": 1,
+        "unit_base_price": "700.00",
+        "unit_sale_price": "350.00",
+        "total_price": "350.00",
+        "metadata": {"showtime_id": "...", "seats": [{"row": "H", "number": 12}]}
+      }
+    ],
+    "created_at": "2026-10-23T14:00:00Z",
+    "updated_at": "2026-10-23T14:00:00Z"
+  }
+}
+```
+
 ---
 
 ## 7. Payments & Ingress Webhooks (`/api/v1/payments`)

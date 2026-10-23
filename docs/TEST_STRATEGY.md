@@ -207,27 +207,34 @@ The following PostgreSQL concurrency tests in `backend/tests/test_holds_concurre
 
 ---
 
-## 6. Automated Test Suites & Regression Baseline (Milestones 1.4 – 1.5.1)
+## 6. Automated Test Suites & Regression Baseline (Milestones 1.4 – 1.7a)
 
-The automated test suite runs via `pytest` backed by both SQLite (fast test runner) and live PostgreSQL 16 (verifying full relational constraints, check conditions, and index integrity).
+The automated test suite runs via `pytest` backed by live PostgreSQL 16.4 and Redis 7 (verifying full relational constraints, check conditions, index integrity, and multi-threaded ACID row locks).
 
 ```
-+--------------------------+------------+-------------------------------------------------------------+
-| Test Module              | Tests Count| Key Verification Focus                                      |
-+--------------------------+------------+-------------------------------------------------------------+
-| test_identity.py         | 15 tests   | Registration, password hashing, token rotation, CSRF cookie,|
-|                          |            | rate limiting, replay defense, case-insensitive email       |
-| test_merchants.py        | 13 tests   | Multi-tenant scoping, RBAC roles (Owner/Admin/Staff),        |
-|                          |            | outlet assignment, compliance masking, secret leak defense   |
-| test_catalog.py          | 15 tests   | 7-category registry capabilities, multi-tenant catalog      |
-|                          |            | item CRUD, logical soft-deletion, inactive query isolation  |
-| test_offers.py           | 12 tests   | Percentage & fixed offers, floor-price clamping telemetry,  |
-|                          |            | currency consistency, authoritative calculation integrity   |
-| test_inventory.py        | 11 tests   | 7 vertical adapters (Cinema, Restaurant, Surplus Food, Hotel|
-|                          |            | Salon, Event, Travel), mock provider tags, availability API |
-| test_health.py           | 1 test     | Core platform health and readiness check                     |
-+--------------------------+------------+-------------------------------------------------------------+
-| TOTAL ACTIVE TESTS       | 67 tests   | 100% Pass Rate across SQLite and PostgreSQL 16               |
-+--------------------------+------------+-------------------------------------------------------------+
++----------------------------+------------+-------------------------------------------------------------+
+| Test Module                | Tests Count| Key Verification Focus                                      |
++----------------------------+------------+-------------------------------------------------------------+
+| test_identity.py           | 15 tests   | Registration, password hashing, token rotation, CSRF cookie,|
+|                            |            | rate limiting, replay defense, case-insensitive email       |
+| test_merchants.py          | 13 tests   | Multi-tenant scoping, RBAC roles (Owner/Admin/Staff),        |
+|                            |            | outlet assignment, compliance masking, secret leak defense   |
+| test_catalog.py            | 15 tests   | 7-category registry capabilities, multi-tenant catalog      |
+|                            |            | item CRUD, logical soft-deletion, inactive query isolation  |
+| test_offers.py             | 12 tests   | Percentage & fixed offers, floor-price clamping telemetry,  |
+|                            |            | currency consistency, authoritative calculation integrity   |
+| test_inventory.py          | 11 tests   | 7 vertical adapters (Cinema, Restaurant, Surplus Food, Hotel|
+|                            |            | Salon, Event, Travel), mock provider tags, availability API |
+| test_health.py             | 1 test     | Core platform health and readiness check                     |
+| test_holds_lifecycle.py    | 11 tests   | Ephemeral hold creation, release, idempotency fingerprint,   |
+|                            |            | expiry checks, double-release defense                       |
+| test_holds_concurrency.py  | 7 tests    | ACID multithreaded contention barriers (Cinema seats,       |
+|                            |            | surplus batches, event quotas, hotel calendar nights)       |
+| test_orders_checkout.py    | 18 tests   | Order checkout from hold, idempotency fingerprinting,       |
+|                            |            | category payment deadlines, RBAC scoping, reservation sweep |
+| test_orders_concurrency.py | 3 tests    | Multithreaded concurrent checkout races, checkout-vs-expiry |
+|                            |            | races, zero partial records & atomic rollback on failure     |
++----------------------------+------------+-------------------------------------------------------------+
+| TOTAL ACTIVE TESTS         | 106 tests  | 100% Pass Rate across PostgreSQL 16.4 and Redis 7            |
++----------------------------+------------+-------------------------------------------------------------+
 ```
-

@@ -131,6 +131,41 @@ def _release_allocations_for_hold(hold: Hold) -> None:
     )
 
 
+def is_hold_or_reservation_expired(holding_hold: Hold) -> bool:
+    """
+    Check if a hold or its associated order reservation is expired.
+    An ACTIVE hold expires when its expires_at timestamp has passed.
+    A CONVERTED_TO_ORDER hold expires when its order reservation payment_deadline has passed.
+    """
+    if holding_hold.status == HoldStatus.ACTIVE:
+        return timezone.now() >= holding_hold.expires_at
+    if holding_hold.status == HoldStatus.CONVERTED_TO_ORDER:
+        if hasattr(holding_hold, "order_reservation"):
+            order_res = holding_hold.order_reservation
+            return bool(order_res.status == "EXPIRED" or timezone.now() >= order_res.payment_deadline)
+        return False
+    return False
+
+
+def reclaim_expired_hold_or_reservation(holding_hold: Hold) -> None:
+    """
+    Atomically release allocations and update state for an expired hold or order reservation.
+    """
+    _release_allocations_for_hold(holding_hold)
+    if holding_hold.status == HoldStatus.ACTIVE:
+        holding_hold.status = HoldStatus.EXPIRED
+        holding_hold.save(update_fields=["status", "updated_at"])
+    elif holding_hold.status == HoldStatus.CONVERTED_TO_ORDER:
+        if hasattr(holding_hold, "order_reservation"):
+            order_res = holding_hold.order_reservation
+            order_res.status = "EXPIRED"
+            order_res.save(update_fields=["status", "updated_at"])
+            order = order_res.order
+            if order.status == "PENDING_PAYMENT":
+                order.status = "CANCELLED_PAYMENT_TIMEOUT"
+                order.save(update_fields=["status", "updated_at"])
+
+
 def acquire_hold(
     customer: User,
     catalog_item: CatalogItem,
@@ -273,12 +308,10 @@ def acquire_hold(
 
                 if seat_alloc is not None:
                     if seat_alloc.status == CinemaSeatAllocation.SeatStatus.HELD:
-                        # Check if holding hold has expired
-                        if seat_alloc.current_hold and seat_alloc.current_hold.is_expired:
-                            # Reclaim expired seat
-                            _release_allocations_for_hold(seat_alloc.current_hold)
-                            seat_alloc.current_hold.status = HoldStatus.EXPIRED
-                            seat_alloc.current_hold.save(update_fields=["status", "updated_at"])
+                        # Check if holding hold or its order reservation has expired
+                        if seat_alloc.current_hold and is_hold_or_reservation_expired(seat_alloc.current_hold):
+                            # Reclaim expired allocation
+                            reclaim_expired_hold_or_reservation(seat_alloc.current_hold)
                             seat_alloc.status = CinemaSeatAllocation.SeatStatus.AVAILABLE
                             seat_alloc.current_hold = None
                         else:
@@ -444,10 +477,8 @@ def acquire_hold(
             )
             if slot is not None:
                 if slot.status == "HELD":
-                    if slot.current_hold and slot.current_hold.is_expired:
-                        _release_allocations_for_hold(slot.current_hold)
-                        slot.current_hold.status = HoldStatus.EXPIRED
-                        slot.current_hold.save(update_fields=["status", "updated_at"])
+                    if slot.current_hold and is_hold_or_reservation_expired(slot.current_hold):
+                        reclaim_expired_hold_or_reservation(slot.current_hold)
                         slot.status = "AVAILABLE"
                         slot.current_hold = None
                     else:
@@ -503,10 +534,8 @@ def acquire_hold(
             )
             if r_slot is not None:
                 if r_slot.status == "HELD":
-                    if r_slot.current_hold and r_slot.current_hold.is_expired:
-                        _release_allocations_for_hold(r_slot.current_hold)
-                        r_slot.current_hold.status = HoldStatus.EXPIRED
-                        r_slot.current_hold.save(update_fields=["status", "updated_at"])
+                    if r_slot.current_hold and is_hold_or_reservation_expired(r_slot.current_hold):
+                        reclaim_expired_hold_or_reservation(r_slot.current_hold)
                         r_slot.status = "AVAILABLE"
                         r_slot.current_hold = None
                     else:

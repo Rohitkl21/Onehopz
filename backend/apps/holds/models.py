@@ -87,8 +87,16 @@ class Hold(models.Model):
 
     @property
     def is_expired(self) -> bool:
-        """Evaluate authoritative expiration against current timezone-aware timestamp."""
-        return timezone.now() >= self.expires_at
+        """
+        Evaluate authoritative expiration against current timezone-aware timestamp.
+        Returns True if the hold is marked EXPIRED or if an ACTIVE hold has passed expires_at.
+        Converted holds are governed by their order reservations and do not expire via hold TTL.
+        """
+        if self.status == HoldStatus.EXPIRED:
+            return True
+        if self.status == HoldStatus.ACTIVE:
+            return timezone.now() >= self.expires_at
+        return False
 
     @property
     def effective_status(self) -> str:

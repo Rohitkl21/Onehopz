@@ -307,15 +307,52 @@ CREATE INDEX idx_orders_is_demo ON orders (is_demo);
 CREATE TABLE order_items (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     order_id UUID NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
-    listing_id UUID NOT NULL REFERENCES listings(id),
-    unit_identifier VARCHAR(100) NOT NULL,
+    offer_id UUID NOT NULL REFERENCES offers_offerspecification(id),
+    catalog_item_id UUID NOT NULL REFERENCES catalog_catalogitem(id),
     quantity INTEGER NOT NULL DEFAULT 1,
-    unit_base_price NUMERIC(12, 2) NOT NULL,
-    unit_sale_price NUMERIC(12, 2) NOT NULL,
-    item_metadata JSONB NOT NULL DEFAULT '{}'
+    unit_base_price NUMERIC(10, 2) NOT NULL,
+    unit_sale_price NUMERIC(10, 2) NOT NULL,
+    total_price NUMERIC(10, 2) NOT NULL,
+    metadata JSONB NOT NULL DEFAULT '{}'
 );
 
 CREATE INDEX idx_order_items_order ON order_items (order_id);
+
+-- Durable Order Reservations (Transferred from Ephemeral Hold)
+CREATE TYPE order_reservation_status_enum AS ENUM (
+    'PENDING_PAYMENT',
+    'CONFIRMED',
+    'EXPIRED',
+    'CANCELLED'
+);
+
+CREATE TABLE order_reservations (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    order_id UUID UNIQUE NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+    hold_id UUID UNIQUE NOT NULL REFERENCES holds(id),
+    status order_reservation_status_enum NOT NULL DEFAULT 'PENDING_PAYMENT',
+    category VARCHAR(32) NOT NULL,
+    lock_reference VARCHAR(255) NOT NULL,
+    allocated_quantity INTEGER NOT NULL DEFAULT 1,
+    reservation_payload JSONB NOT NULL DEFAULT '{}',
+    payment_deadline TIMESTAMP WITH TIME ZONE NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CLOCK_TIMESTAMP(),
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CLOCK_TIMESTAMP()
+);
+
+CREATE INDEX idx_order_res_sweep ON order_reservations (payment_deadline) WHERE status = 'PENDING_PAYMENT';
+CREATE INDEX idx_order_res_lookup ON order_reservations (order_id, status);
+
+-- Checkout Idempotency Tracking
+CREATE TABLE checkout_idempotency (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    customer_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    idempotency_key VARCHAR(128) NOT NULL,
+    request_hash VARCHAR(64) NOT NULL,
+    order_id UUID NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CLOCK_TIMESTAMP(),
+    CONSTRAINT uq_checkout_customer_key UNIQUE (customer_id, idempotency_key)
+);
 ```
 
 ### 3.5 Payments, Double-Entry Ledger, Refunds & Settlements

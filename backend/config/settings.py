@@ -55,7 +55,11 @@ INSTALLED_APPS = [
     "corsheaders",
     # Internal core shared apps
     "apps.core.apps.CoreConfig",
+    "apps.identity.apps.IdentityConfig",
+    "apps.merchants.apps.MerchantsConfig",
 ]
+
+AUTH_USER_MODEL = "identity.User"
 
 # Conditionally include GIS app if GDAL is available or running in container
 ENABLE_GIS = os.getenv("ENABLE_GIS", "auto")
@@ -190,8 +194,11 @@ REST_FRAMEWORK: dict[str, Any] = {
     "DEFAULT_PARSER_CLASSES": [
         "rest_framework.parsers.JSONParser",
     ],
+    "DEFAULT_AUTHENTICATION_CLASSES": [
+        "apps.identity.authentication.JSONWebTokenAuthentication",
+    ],
     "DEFAULT_PERMISSION_CLASSES": [
-        "rest_framework.permissions.AllowAny",
+        "rest_framework.permissions.IsAuthenticated",
     ],
     "UNAUTHENTICATED_USER": None,
 }

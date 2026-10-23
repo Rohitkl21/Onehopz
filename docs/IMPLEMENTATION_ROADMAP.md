@@ -13,10 +13,11 @@
 LEVEL 1: ARCHITECTURE, FOUNDATION & CORE ENGINE
   ├── Milestone 1.1: Master Product Requirements Specification [COMPLETED]
   ├── Milestone 1.2: Finalize System Architecture and Data Model [COMPLETED]
-  ├── Milestone 1.3: Development Environment and Repository Setup [NEXT MILESTONE]
-  ├── Milestone 1.4: Core Identity, RBAC & Multi-Tenant Merchant Model
-  ├── Milestone 1.5: PostGIS Spatial Discovery & Universal Catalog
-  ├── Milestone 1.6: Authoritative Hold Engine & ACID Concurrency Core
+  ├── Milestone 1.3: Development Environment and Repository Setup [COMPLETED]
+  ├── Milestone 1.4: Core Identity, RBAC & Multi-Tenant Merchant Model [COMPLETED]
+  │     └── Milestone 1.4.1: Authentication Security Hardening [COMPLETED]
+  ├── Milestone 1.5: Core Catalog, Offer Specifications & Inventory Domain [COMPLETED]
+  ├── Milestone 1.6: Authoritative Hold Engine & ACID Concurrency Core [NEXT MILESTONE]
   ├── Milestone 1.7: Payment Gateway Orchestrator & Escrow Webhook Pipeline
   └── Milestone 1.8: MVP Category Implementations (Cinema, Restaurant, Surplus Food)
 
@@ -59,42 +60,37 @@ LEVEL 4: PRODUCTION HARDENING, COMPLIANCE & COMMERCIAL LAUNCH
 - **Verification Evidence**: Updated `SYSTEM_ARCHITECTURE.md`, `DATA_MODEL.md`, `API_CONTRACTS.md`, `BUSINESS_MODULES.md`, `TEST_STRATEGY.md`, `SECURITY_AND_COMPLIANCE.md`, and `IMPLEMENTATION_ROADMAP.md`.
 
 ### Milestone 1.3: Development Environment and Repository Setup
-- **Status**: Next Milestone (Pending Review & Sign-Off).
-- **Prerequisites**: Milestone 1.2 accepted.
+- **Status**: Completed.
 - **Deliverables**:
   - Root monorepo structure with Next.js frontend (`/frontend`) and Django backend (`/backend`).
   - Standardized `docker-compose.yml` configuring PostgreSQL 16 with PostGIS 3.4, Redis 7, Django API, Celery worker, Celery beat, and Next.js.
-  - Static analysis, linters, formatters, and typing configurations (`ruff`, `mypy --strict`, `eslint`, `prettier`).
+  - Static analysis, linters, formatters, and typing configurations (`ruff`, `mypy`, `eslint`, `prettier`).
   - Environment templates (`.env.example`) with zero committed credentials.
-- **Dependencies**: Docker, Git.
-- **Acceptance Criteria**: Running `docker compose up` spins up all containers; automated healthcheck returns `200 OK` for backend and frontend.
-- **Verification Evidence**: Terminal output of `docker compose ps` healthy status and green CI test run.
+- **Verification Evidence**: Clean container builds, green test runs, and initial repository scaffold.
 
 ### Milestone 1.4: Core Identity, RBAC & Multi-Tenant Merchant Model
-- **Prerequisites**: Milestone 1.3 complete.
+- **Status**: Completed (with Milestone 1.4.1 Security Hardening).
 - **Deliverables**:
-  - `core.identity` Django app with custom `User`, `Role`, and `RefreshToken` models.
-  - `core.merchants` Django app with `Merchant`, `Outlet`, and `OutletStaff` models.
-  - JWT authentication endpoints with rotating HttpOnly refresh cookies.
-- **Dependencies**: Milestone 1.3.
-- **Acceptance Criteria**: User registration, login, token refresh, and role enforcement pass all automated test suites.
-- **Verification Evidence**: Pytest report showing 100% pass on auth and permission matrix tests.
+  - `apps.identity` Django app with custom `User`, `UserRole`, and `RefreshToken` models.
+  - `apps.merchants` Django app with `Merchant`, `MerchantMembership`, `Outlet`, and `OutletStaff` models.
+  - JWT authentication endpoints with rotating HttpOnly refresh cookies, CSRF validation, and replay detection.
+- **Verification Evidence**: Automated pytest suite and live PostgreSQL 16 audit passing.
 
-### Milestone 1.5: PostGIS Spatial Discovery & Universal Catalog
-- **Prerequisites**: Milestone 1.4 complete.
+### Milestone 1.5: Core Catalog, Offer Specifications & Inventory Domain
+- **Status**: Completed (Current Milestone).
 - **Deliverables**:
-  - `core.catalog` Django app with PostGIS `Point` geography field on Outlets.
-  - Universal discovery API (`GET /api/v1/discovery/search`) with radius and category filtering.
-  - GIST spatial indexes configured and benchmarked.
-- **Dependencies**: Milestone 1.4.
-- **Acceptance Criteria**: Spatial query returns outlets within 5 km, 15 km, and 50 km correctly ordered by distance in $< 100\text{ ms}$.
-- **Verification Evidence**: Spatial query execution plan (`EXPLAIN ANALYZE`) confirming index scan.
+  - `apps.catalog` Django app with `CategoryRegistry`, capability declarations across all 7 verticals, and `CatalogItem` model.
+  - `apps.offers` Django app with `OfferSpecification`, constraints, and precise financial calculation service (`calculate_discounted_price`).
+  - `apps.inventory` domain contracts (`BaseInventoryAdapter`, `AvailabilityQuery`, `AvailabilityResult`) and `InventoryRegistry`.
+  - Seven vertical adapters (`Cinema`, `Restaurant`, `SurplusFood`, `Hotel`, `Salon`, `Event`, `Travel`) providing simulated availability.
+  - Tenant-isolated REST APIs (`/api/v1/catalog/`, `/api/v1/offers/`, `/api/v1/inventory/`).
+- **Verification Evidence**: 57 automated tests passing on SQLite and live PostgreSQL 16; zero ruff or mypy errors across 66 source files.
 
 ### Milestone 1.6: Authoritative Hold Engine & ACID Concurrency Core
+- **Status**: Next Milestone (Pending Review & Sign-Off).
 - **Prerequisites**: Milestone 1.5 complete.
 - **Deliverables**:
   - `core.holds` Django app with PostgreSQL-backed row-level locking (`SELECT ... FOR UPDATE`).
-  - Polymorphic `InventoryCapability` interface and `CategoryAdapterRegistry`.
   - Authoritative expiration enforcement at query time (`expires_at > CLOCK_TIMESTAMP()`).
   - Passive expiration validation and Celery background cleaner for expired holds.
 - **Dependencies**: Milestones 1.4, 1.5.

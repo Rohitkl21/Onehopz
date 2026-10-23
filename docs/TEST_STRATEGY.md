@@ -190,3 +190,30 @@ def test_concurrent_hotel_multi_night_hold():
 |   reporting obligations generated  |   statutory audit and TCS filings |
 +------------------------------------+-----------------------------------+
 ```
+
+---
+
+## 6. Automated Test Suites & Regression Baseline (Milestones 1.4 – 1.5)
+
+The automated test suite runs via `pytest` backed by both SQLite (fast test runner) and live PostgreSQL 16 (verifying full relational constraints, check conditions, and index integrity).
+
+```
++--------------------------+------------+-------------------------------------------------------------+
+| Test Module              | Tests Count| Key Verification Focus                                      |
++--------------------------+------------+-------------------------------------------------------------+
+| test_identity.py         | 15 tests   | Registration, password hashing, token rotation, CSRF cookie,|
+|                          |            | rate limiting, replay defense, case-insensitive email       |
+| test_merchants.py        | 13 tests   | Multi-tenant scoping, RBAC roles (Owner/Admin/Staff),        |
+|                          |            | outlet assignment, compliance masking, secret leak defense   |
+| test_catalog.py          | 9 tests    | 7-category registry capabilities, multi-tenant catalog      |
+|                          |            | item CRUD, base price >= 0 check, cross-tenant outlet block |
+| test_offers.py           | 8 tests    | Percentage and fixed offers, date constraints, ceiling cap, |
+|                          |            | floor price enforcement, two-decimal precision calculation  |
+| test_inventory.py        | 11 tests   | 7 vertical adapters (Cinema, Restaurant, Surplus Food, Hotel|
+|                          |            | Salon, Event, Travel), mock provider tags, availability API |
+| test_health.py           | 1 test     | Core platform health and readiness check                     |
++--------------------------+------------+-------------------------------------------------------------+
+| TOTAL ACTIVE TESTS       | 57 tests   | 100% Pass Rate across SQLite and PostgreSQL 16               |
++--------------------------+------------+-------------------------------------------------------------+
+```
+

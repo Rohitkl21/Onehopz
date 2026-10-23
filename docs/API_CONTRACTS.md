@@ -156,6 +156,132 @@ All state-modifying `POST`, `PUT`, or `PATCH` endpoints that trigger financial t
 
 ---
 
+## 2.5 Core Catalog, Offers & Polymorphic Inventory (`/api/v1/catalog`, `/api/v1/offers`, `/api/v1/inventory`)
+
+### 2.5.1 Category Capabilities Directory
+- **Endpoint**: `GET /api/v1/catalog/categories/`
+- **Auth**: Public
+- **Response (200 OK)**:
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "category": "CINEMA",
+      "display_name": "Cinema Ticket Booking",
+      "allocation_unit": "seat",
+      "has_seat_map": true,
+      "has_time_slots": true,
+      "has_date_range": false,
+      "has_expiry_window": false,
+      "is_supplier_managed": false,
+      "concurrency_model": "discrete_seat_lock",
+      "cancellation_rules_summary": "Permitted up to 2 hours before showtime",
+      "requires_fssai": false
+    },
+    ...
+  ]
+}
+```
+
+### 2.5.2 Catalog Items Management & Browsing
+- **List / Search Items**: `GET /api/v1/catalog/items/?merchant_id={uuid}&outlet_id={uuid}&category={CAT}&is_active=true`
+- **Create Catalog Item**: `POST /api/v1/catalog/items/`
+  - **Auth**: Merchant Owner / Admin / Platform Admin
+  - **Request Body**:
+    ```json
+    {
+      "merchant": "12345678-1234-5678-1234-567812345678",
+      "outlet": "87654321-4321-8765-4321-876543210987",
+      "category": "CINEMA",
+      "title": "Evening IMAX Show - Interstellar",
+      "description": "Late-evening IMAX 70mm screening",
+      "base_price": "450.00",
+      "currency": "INR",
+      "metadata": { "screen": 1, "format": "IMAX 2D" }
+    }
+    ```
+- **Retrieve Item**: `GET /api/v1/catalog/items/{id}/`
+- **Update Item**: `PUT/PATCH /api/v1/catalog/items/{id}/`
+- **Delete Item**: `DELETE /api/v1/catalog/items/{id}/`
+
+### 2.5.3 Offer Specifications & Dynamic Pricing Engine
+- **List Offers**: `GET /api/v1/offers/?merchant_id={uuid}&catalog_item_id={uuid}&is_active=true`
+- **Create Offer**: `POST /api/v1/offers/`
+  - **Auth**: Merchant Owner / Admin
+  - **Request Body**:
+    ```json
+    {
+      "merchant": "12345678-1234-5678-1234-567812345678",
+      "catalog_item": "550e8400-e29b-41d4-a716-446655440000",
+      "title": "Last Hour Flash 40% Off",
+      "offer_type": "PERCENTAGE",
+      "discount_value": "40.00",
+      "max_discount_amount": "300.00",
+      "floor_price": "200.00",
+      "valid_from": "2026-10-23T18:00:00Z",
+      "valid_to": "2026-10-23T22:00:00Z"
+    }
+    ```
+- **Preview Pricing Calculation**: `POST /api/v1/offers/calculate/`
+  - **Request Body**: `{ "offer_id": "{uuid}", "base_price": "500.00" }`
+  - **Response (200 OK)**:
+    ```json
+    {
+      "success": true,
+      "data": {
+        "base_price": "500.00",
+        "discount_amount": "200.00",
+        "final_price": "300.00",
+        "savings_percentage": "40.00"
+      }
+    }
+    ```
+
+### 2.5.4 Polymorphic Inventory Availability Engine
+- **Check Vertical Availability**: `POST /api/v1/inventory/availability/`
+  - **Auth**: Public
+  - **Request Body**:
+    ```json
+    {
+      "category": "CINEMA",
+      "quantity": 2,
+      "date": "2026-10-24",
+      "start_time": "19:30:00",
+      "parameters": { "screen": 1 }
+    }
+    ```
+  - **Response (200 OK)**:
+    ```json
+    {
+      "success": true,
+      "data": {
+        "is_available": true,
+        "available_units": 75,
+        "category": "CINEMA",
+        "breakdown": {
+          "screen_number": 1,
+          "showtime": "19:30:00",
+          "total_capacity": 120,
+          "available_seats": 75,
+          "hold_window_minutes": 8,
+          "sample_allocated_seats": [
+            { "row": "E", "seat_number": 12, "tier": "PREMIUM", "status": "AVAILABLE" },
+            { "row": "E", "seat_number": 13, "tier": "PREMIUM", "status": "AVAILABLE" }
+          ]
+        },
+        "is_simulated": true,
+        "messages": [
+          "Simulated cinema inventory: 75 of 120 seats available."
+        ]
+      }
+    }
+    ```
+- **Inspect All Inventory Capabilities**: `GET /api/v1/inventory/capabilities/`
+
+
+---
+
 ## 3. Geographic & Catalog Discovery (`/api/v1/discovery`)
 
 ### 3.1 Spatial Discovery & Multi-Category Search

@@ -57,6 +57,9 @@ INSTALLED_APPS = [
     "apps.core.apps.CoreConfig",
     "apps.identity.apps.IdentityConfig",
     "apps.merchants.apps.MerchantsConfig",
+    "apps.catalog.apps.CatalogConfig",
+    "apps.offers.apps.OffersConfig",
+    "apps.inventory.apps.InventoryConfig",
 ]
 
 AUTH_USER_MODEL = "identity.User"

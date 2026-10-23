@@ -183,43 +183,60 @@ CREATE TABLE outlet_staff (
 
 ### 3.3 Catalog, Listings & Dynamic Offers
 
+#### 3.3.1 Relational Architecture & Implemented Django Schema (Milestone 1.5)
+
+In Milestone 1.5, the Catalog and Offer domain models were formally established in `apps.catalog` and `apps.offers` with tenant-scoped validation and database constraints:
+
 ```sql
--- Unified Catalog Listing
-CREATE TABLE listings (
+-- Catalog Items (apps.catalog.models.CatalogItem)
+CREATE TABLE catalog_catalogitem (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    outlet_id UUID NOT NULL REFERENCES outlets(id) ON DELETE CASCADE,
-    merchant_id UUID NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
+    merchant_id UUID NOT NULL REFERENCES merchants_merchant(id) ON DELETE CASCADE,
+    outlet_id UUID REFERENCES merchants_outlet(id) ON DELETE SET NULL,
     category VARCHAR(50) NOT NULL, -- CINEMA, RESTAURANT, SURPLUS_FOOD, HOTEL, SALON, EVENT, TRAVEL
     title VARCHAR(255) NOT NULL,
-    description TEXT,
+    description TEXT NOT NULL DEFAULT '',
     base_price NUMERIC(12, 2) NOT NULL,
     currency VARCHAR(3) NOT NULL DEFAULT 'INR',
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
     is_demo BOOLEAN NOT NULL DEFAULT FALSE,
+    metadata JSONB NOT NULL DEFAULT '{}',
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CLOCK_TIMESTAMP(),
-    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CLOCK_TIMESTAMP()
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CLOCK_TIMESTAMP(),
+    CONSTRAINT chk_catalog_item_base_price_non_negative CHECK (base_price >= 0.00)
 );
 
-CREATE INDEX idx_listings_outlet_cat ON listings (outlet_id, category);
-CREATE INDEX idx_listings_is_demo ON listings (is_demo);
+CREATE INDEX idx_cat_item_merchant_active ON catalog_catalogitem (merchant_id, is_active);
+CREATE INDEX idx_cat_item_cat_active ON catalog_catalogitem (category, is_active);
+CREATE INDEX idx_cat_item_outlet_active ON catalog_catalogitem (outlet_id, is_active);
 
--- Dynamic Yield & Time-Decay Offer Policies
-CREATE TABLE offers (
+-- Offer Specifications (apps.offers.models.OfferSpecification)
+CREATE TABLE offers_offerspecification (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    listing_id UUID NOT NULL REFERENCES listings(id) ON DELETE CASCADE,
-    policy_name VARCHAR(100) NOT NULL,
-    decay_model VARCHAR(50) NOT NULL, -- LINEAR, EXPONENTIAL, STEPPED, OCCUPANCY_TRIGGERED
-    floor_price NUMERIC(12, 2) NOT NULL,
-    max_discount_percentage NUMERIC(5, 2) NOT NULL, -- e.g. 70.00%
-    start_time TIMESTAMP WITH TIME ZONE NOT NULL,
-    end_time TIMESTAMP WITH TIME ZONE NOT NULL,
-    parameters JSONB NOT NULL DEFAULT '{}',
+    merchant_id UUID NOT NULL REFERENCES merchants_merchant(id) ON DELETE CASCADE,
+    outlet_id UUID REFERENCES merchants_outlet(id) ON DELETE SET NULL,
+    catalog_item_id UUID REFERENCES catalog_catalogitem(id) ON DELETE CASCADE,
+    category VARCHAR(50),
+    title VARCHAR(255) NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    offer_type VARCHAR(20) NOT NULL DEFAULT 'PERCENTAGE', -- PERCENTAGE, FIXED_AMOUNT
+    discount_value NUMERIC(10, 2) NOT NULL,
+    max_discount_amount NUMERIC(10, 2),
+    floor_price NUMERIC(10, 2),
+    valid_from TIMESTAMP WITH TIME ZONE NOT NULL,
+    valid_to TIMESTAMP WITH TIME ZONE NOT NULL,
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
     is_demo BOOLEAN NOT NULL DEFAULT FALSE,
-    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CLOCK_TIMESTAMP()
+    parameters JSONB NOT NULL DEFAULT '{}',
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CLOCK_TIMESTAMP(),
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CLOCK_TIMESTAMP(),
+    CONSTRAINT chk_offer_discount_val_gt_zero CHECK (discount_value > 0.00),
+    CONSTRAINT chk_offer_valid_dates CHECK (valid_to > valid_from)
 );
 
-CREATE INDEX idx_offers_listing_active ON offers (listing_id, is_active, start_time, end_time);
+CREATE INDEX idx_offer_merch_active_dates ON offers_offerspecification (merchant_id, is_active, valid_from, valid_to);
+CREATE INDEX idx_offer_item_active ON offers_offerspecification (catalog_item_id, is_active);
+CREATE INDEX idx_offer_cat_active ON offers_offerspecification (category, is_active);
 ```
 
 ### 3.4 Authoritative Holds, Orders & Items

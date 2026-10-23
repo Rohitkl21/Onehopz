@@ -62,6 +62,11 @@ class OfferSpecification(models.Model):
         decimal_places=2,
         help_text="Percentage value (e.g. 25.00 for 25%) or fixed currency discount (e.g. 150.00).",
     )
+    currency = models.CharField(
+        max_length=3,
+        default="INR",
+        help_text="Currency ISO code (INR, USD, etc.). For item-bound offers, derived from the catalog item.",
+    )
     max_discount_amount = models.DecimalField(
         max_digits=10,
         decimal_places=2,
@@ -141,12 +146,48 @@ class OfferSpecification(models.Model):
         ):
             errors["catalog_item"] = "Catalog item must belong to the specified merchant."
 
+        # Currency consistency with bound catalog item
+        if self.catalog_item_id and self.catalog_item:
+            if not self.currency:
+                self.currency = self.catalog_item.currency
+            elif self.currency.upper() != self.catalog_item.currency.upper():
+                errors["currency"] = (
+                    f"Offer currency '{self.currency}' must match bound catalog item "
+                    f"currency '{self.catalog_item.currency}'."
+                )
+
+        # Floor price validations
+        if self.floor_price is not None:
+            if self.floor_price < Decimal("0.00"):
+                errors["floor_price"] = "Floor price cannot be negative."
+            elif (
+                self.catalog_item_id
+                and self.catalog_item
+                and self.floor_price > self.catalog_item.base_price
+            ):
+                errors["floor_price"] = (
+                    f"Floor price ({self.floor_price}) cannot exceed the bound catalog item "
+                    f"base price ({self.catalog_item.base_price})."
+                )
+            elif (
+                self.offer_type == OfferType.FIXED_AMOUNT
+                and self.catalog_item_id
+                and self.catalog_item
+                and (self.catalog_item.base_price - self.discount_value) < self.floor_price
+            ):
+                errors["discount_value"] = (
+                    f"Fixed discount ({self.discount_value}) on base price "
+                    f"({self.catalog_item.base_price}) breaches floor price ({self.floor_price})."
+                )
+
         if errors:
             raise ValidationError(errors)
 
     def save(self, *args: Any, **kwargs: Any) -> None:
+        if self.catalog_item_id and self.catalog_item and not self.currency:
+            self.currency = self.catalog_item.currency
         self.full_clean()
         super().save(*args, **kwargs)
 
     def __str__(self) -> str:
-        return f"{self.title} ({self.offer_type} {self.discount_value})"
+        return f"{self.title} ({self.offer_type} {self.discount_value} {self.currency})"

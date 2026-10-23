@@ -17,6 +17,7 @@ LEVEL 1: ARCHITECTURE, FOUNDATION & CORE ENGINE
   ├── Milestone 1.4: Core Identity, RBAC & Multi-Tenant Merchant Model [COMPLETED]
   │     └── Milestone 1.4.1: Authentication Security Hardening [COMPLETED]
   ├── Milestone 1.5: Core Catalog, Offer Specifications & Inventory Domain [COMPLETED]
+  │     └── Milestone 1.5.1: Catalog and Offer Security/Integrity Fixes [COMPLETED]
   ├── Milestone 1.6: Authoritative Hold Engine & ACID Concurrency Core [NEXT MILESTONE]
   ├── Milestone 1.7: Payment Gateway Orchestrator & Escrow Webhook Pipeline
   └── Milestone 1.8: MVP Category Implementations (Cinema, Restaurant, Surplus Food)
@@ -77,14 +78,17 @@ LEVEL 4: PRODUCTION HARDENING, COMPLIANCE & COMMERCIAL LAUNCH
 - **Verification Evidence**: Automated pytest suite and live PostgreSQL 16 audit passing.
 
 ### Milestone 1.5: Core Catalog, Offer Specifications & Inventory Domain
-- **Status**: Completed (Current Milestone).
+- **Status**: Completed (with Milestone 1.5.1 Security/Integrity Hardening).
 - **Deliverables**:
   - `apps.catalog` Django app with `CategoryRegistry`, capability declarations across all 7 verticals, and `CatalogItem` model.
-  - `apps.offers` Django app with `OfferSpecification`, constraints, and precise financial calculation service (`calculate_discounted_price`).
+  - Logical soft-deletion semantics protecting catalog items, offers, and future booking audit trails.
+  - Strict tenant isolation and visibility scoping on catalog and offer list/detail endpoints.
+  - `apps.offers` Django app with `OfferSpecification`, currency derivation, floor-price validations, and precise financial calculation service (`calculate_discounted_price`).
+  - Authoritative offer calculation API (`/api/v1/offers/calculate/`) enforcing price integrity, validity windows, and transparent floor clamping telemetry.
   - `apps.inventory` domain contracts (`BaseInventoryAdapter`, `AvailabilityQuery`, `AvailabilityResult`) and `InventoryRegistry`.
   - Seven vertical adapters (`Cinema`, `Restaurant`, `SurplusFood`, `Hotel`, `Salon`, `Event`, `Travel`) providing simulated availability.
   - Tenant-isolated REST APIs (`/api/v1/catalog/`, `/api/v1/offers/`, `/api/v1/inventory/`).
-- **Verification Evidence**: 57 automated tests passing on SQLite and live PostgreSQL 16; zero ruff or mypy errors across 66 source files.
+- **Verification Evidence**: 67 automated tests passing on SQLite and live PostgreSQL 16; zero ruff or mypy errors across 67 source files.
 
 ### Milestone 1.6: Authoritative Hold Engine & ACID Concurrency Core
 - **Status**: Next Milestone (Pending Review & Sign-Off).

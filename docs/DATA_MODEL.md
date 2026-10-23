@@ -221,6 +221,7 @@ CREATE TABLE offers_offerspecification (
     description TEXT NOT NULL DEFAULT '',
     offer_type VARCHAR(20) NOT NULL DEFAULT 'PERCENTAGE', -- PERCENTAGE, FIXED_AMOUNT
     discount_value NUMERIC(10, 2) NOT NULL,
+    currency VARCHAR(3) NOT NULL DEFAULT 'INR',
     max_discount_amount NUMERIC(10, 2),
     floor_price NUMERIC(10, 2),
     valid_from TIMESTAMP WITH TIME ZONE NOT NULL,

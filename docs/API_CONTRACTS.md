@@ -186,6 +186,11 @@ All state-modifying `POST`, `PUT`, or `PATCH` endpoints that trigger financial t
 
 ### 2.5.2 Catalog Items Management & Browsing
 - **List / Search Items**: `GET /api/v1/catalog/items/?merchant_id={uuid}&outlet_id={uuid}&category={CAT}&is_active=true`
+  - **Visibility Rules**:
+    - Anonymous users and ordinary customers strictly see active items (`is_active=True`). Requesting `is_active=false` returns `403 Forbidden`.
+    - Authenticated merchant members querying without `merchant_id` are automatically scoped to their owned merchant organizations.
+    - Specifying an invalid boolean for `is_active` returns `400 Bad Request` with `VALIDATION_ERROR`.
+    - Platform administrators retain full visibility across all active and inactive records.
 - **Create Catalog Item**: `POST /api/v1/catalog/items/`
   - **Auth**: Merchant Owner / Admin / Platform Admin
   - **Request Body**:
@@ -202,11 +207,14 @@ All state-modifying `POST`, `PUT`, or `PATCH` endpoints that trigger financial t
     }
     ```
 - **Retrieve Item**: `GET /api/v1/catalog/items/{id}/`
+  - Inactive items return `404 Not Found` for customers, but are accessible to authorized merchant members.
 - **Update Item**: `PUT/PATCH /api/v1/catalog/items/{id}/`
 - **Delete Item**: `DELETE /api/v1/catalog/items/{id}/`
+  - **Semantics**: Performs logical soft-deletion (`is_active = false`). Does NOT physically delete the database row. Preserves all linked offers and historical transaction records. Calling repeatedly is idempotent (`200 OK`).
 
 ### 2.5.3 Offer Specifications & Dynamic Pricing Engine
 - **List Offers**: `GET /api/v1/offers/?merchant_id={uuid}&catalog_item_id={uuid}&is_active=true`
+  - Enforces the same tenant isolation and visibility scoping as catalog items.
 - **Create Offer**: `POST /api/v1/offers/`
   - **Auth**: Merchant Owner / Admin
   - **Request Body**:
@@ -217,23 +225,35 @@ All state-modifying `POST`, `PUT`, or `PATCH` endpoints that trigger financial t
       "title": "Last Hour Flash 40% Off",
       "offer_type": "PERCENTAGE",
       "discount_value": "40.00",
+      "currency": "INR",
       "max_discount_amount": "300.00",
       "floor_price": "200.00",
       "valid_from": "2026-10-23T18:00:00Z",
       "valid_to": "2026-10-23T22:00:00Z"
     }
     ```
-- **Preview Pricing Calculation**: `POST /api/v1/offers/calculate/`
-  - **Request Body**: `{ "offer_id": "{uuid}", "base_price": "500.00" }`
+- **Preview Authoritative Pricing Calculation**: `POST /api/v1/offers/calculate/`
+  - **Integrity Constraints**:
+    - For item-bound offers, the authoritative price and currency are derived directly from the bound `CatalogItem`. Caller-provided `base_price` tampering is rejected with `PRICE_MISMATCH`.
+    - Inactive offers (`OFFER_INACTIVE`), expired offers (`OFFER_EXPIRED`), or offers bound to deactivated items (`ITEM_INACTIVE`) return `400 Bad Request`.
+    - Transparent floor price tracking: If the discount would breach `floor_price`, the discount is clamped to `base_price - floor_price` and `is_floor_price_clamped: true` is returned alongside the actual `actual_savings_percentage`.
+  - **Request Body**: `{ "offer_id": "{uuid}" }` (or `{ "offer_id": "{uuid}", "catalog_item_id": "{uuid}" }`)
   - **Response (200 OK)**:
     ```json
     {
       "success": true,
       "data": {
-        "base_price": "500.00",
-        "discount_amount": "200.00",
-        "final_price": "300.00",
-        "savings_percentage": "40.00"
+        "offer_id": "550e8400-e29b-41d4-a716-446655440000",
+        "catalog_item_id": "8b981622-4467-466d-a31a-e89a24ee5901",
+        "base_price": "200.00",
+        "discount_amount": "50.00",
+        "final_price": "150.00",
+        "advertised_discount_value": "50.00",
+        "offer_type": "PERCENTAGE",
+        "actual_savings_percentage": "25.00",
+        "is_floor_price_clamped": true,
+        "is_max_discount_capped": false,
+        "currency": "INR"
       }
     }
     ```

@@ -1,18 +1,20 @@
-"""Views for Offer specifications and dynamic yield calculations."""
+"""Views for Offer specifications, tenant isolation, and authoritative dynamic pricing calculations."""
 
 from decimal import Decimal
 from uuid import UUID
 
 from django.http import Http404
 from django.shortcuts import get_object_or_404
+from django.utils import timezone
 from rest_framework import permissions, status
 from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.catalog.models import CatalogItem
 from apps.identity.models import User
 from apps.merchants.models import Merchant, MerchantMembership
-from apps.merchants.views import user_can_manage_merchant
+from apps.merchants.views import user_can_manage_merchant, user_can_view_merchant
 
 from .models import OfferSpecification
 from .serializers import (
@@ -26,7 +28,7 @@ from .services import calculate_discounted_price
 class OfferListCreateView(APIView):
     """
     List offers (scoped to merchant, catalog item, or public active offers)
-    or create a new offer specification.
+    or create a new offer specification under an authorized merchant organization.
     """
 
     def get_permissions(self) -> list[permissions.BasePermission]:
@@ -46,12 +48,41 @@ class OfferListCreateView(APIView):
         is_active_param = request.query_params.get("is_active")
 
         user = request.user
-        is_merchant_user = (
-            isinstance(user, User)
-            and user.is_authenticated
-            and MerchantMembership.objects.filter(user=user, is_active=True).exists()
+        is_authenticated = isinstance(user, User) and user.is_authenticated
+        is_platform_admin = (
+            isinstance(user, User) and user.is_authenticated and user.is_platform_admin
         )
 
+        # Validate is_active boolean filter if provided
+        is_active_filter: bool | None = None
+        if is_active_param is not None:
+            val = is_active_param.strip().lower()
+            if val in ("true", "1"):
+                is_active_filter = True
+            elif val in ("false", "0"):
+                is_active_filter = False
+            else:
+                return Response(
+                    {
+                        "success": False,
+                        "error": {
+                            "code": "VALIDATION_ERROR",
+                            "message": "Invalid boolean value for is_active. Allowed: true, false, 1, 0.",
+                        },
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        # Retrieve user active merchant memberships
+        user_merchant_ids: set[UUID] = set()
+        if isinstance(user, User) and user.is_authenticated:
+            user_merchant_ids = set(
+                MerchantMembership.objects.filter(user=user, is_active=True).values_list(
+                    "merchant_id", flat=True
+                )
+            )
+
+        merchant_uuid: UUID | None = None
         if merchant_id:
             try:
                 merchant_uuid = UUID(merchant_id)
@@ -97,13 +128,42 @@ class OfferListCreateView(APIView):
         if category:
             queryset = queryset.filter(category=category.upper())
 
-        if is_active_param is not None:
-            active_bool = is_active_param.lower() in ("true", "1")
-            queryset = queryset.filter(is_active=active_bool)
-        elif not is_merchant_user and not (
-            isinstance(user, User) and user.is_authenticated and user.is_platform_admin
+        # Determine caller's operational context
+        is_privileged_merchant_query = False
+        if (
+            is_platform_admin
+            or is_authenticated
+            and merchant_uuid
+            and merchant_uuid in user_merchant_ids
         ):
+            is_privileged_merchant_query = True
+        elif (
+            is_authenticated
+            and not merchant_uuid
+            and user_merchant_ids
+            and is_active_filter is not True
+        ):
+            # Management query across caller's merchants
+            queryset = queryset.filter(merchant_id__in=user_merchant_ids)
+            is_privileged_merchant_query = True
+
+        # Enforce visibility rules
+        if not is_privileged_merchant_query:
+            if is_active_filter is False:
+                return Response(
+                    {
+                        "success": False,
+                        "error": {
+                            "code": "FORBIDDEN",
+                            "message": "Public users and unauthorized members cannot query inactive offer specifications.",
+                        },
+                    },
+                    status=status.HTTP_403_FORBIDDEN,
+                )
             queryset = queryset.filter(is_active=True)
+        else:
+            if is_active_filter is not None:
+                queryset = queryset.filter(is_active=is_active_filter)
 
         serializer = OfferSpecificationSerializer(queryset.order_by("-created_at"), many=True)
         return Response({"success": True, "data": serializer.data}, status=status.HTTP_200_OK)
@@ -174,7 +234,7 @@ class OfferListCreateView(APIView):
 
 
 class OfferDetailView(APIView):
-    """Retrieve, update, or delete an offer specification."""
+    """Retrieve, update, or deactivate an offer specification with tenant verification."""
 
     def get_permissions(self) -> list[permissions.BasePermission]:
         if self.request.method in ("PUT", "PATCH", "DELETE"):
@@ -193,6 +253,24 @@ class OfferDetailView(APIView):
 
     def get(self, request: Request, pk: str) -> Response:
         offer = self.get_object(pk)
+        user = request.user
+
+        if not offer.is_active and (
+            not isinstance(user, User)
+            or not user.is_authenticated
+            or not user_can_view_merchant(user, offer.merchant)
+        ):
+            return Response(
+                {
+                    "success": False,
+                    "error": {
+                        "code": "NOT_FOUND",
+                        "message": "Offer specification not found or inactive.",
+                    },
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
         serializer = OfferSpecificationSerializer(offer)
         return Response({"success": True, "data": serializer.data}, status=status.HTTP_200_OK)
 
@@ -237,6 +315,7 @@ class OfferDetailView(APIView):
         )
 
     def delete(self, request: Request, pk: str) -> Response:
+        """Logically deactivate the offer specification to preserve historical integrity."""
         offer = self.get_object(pk)
         user = request.user
 
@@ -252,15 +331,23 @@ class OfferDetailView(APIView):
                 status=status.HTTP_403_FORBIDDEN,
             )
 
-        offer.delete()
+        offer.is_active = False
+        offer.save(update_fields=["is_active", "updated_at"])
         return Response(
-            {"success": True, "message": "Offer specification successfully deleted."},
+            {
+                "success": True,
+                "message": "Offer specification successfully deactivated.",
+                "data": OfferSpecificationSerializer(offer).data,
+            },
             status=status.HTTP_200_OK,
         )
 
 
 class OfferCalculateView(APIView):
-    """Preview or calculate discounted price for a given base price and offer."""
+    """
+    Public price-preview endpoint calculating authoritative offer discounts.
+    Enforces validity windows, bound catalog-item price integrity, and floor price tracking.
+    """
 
     permission_classes = [permissions.AllowAny]
 
@@ -270,41 +357,190 @@ class OfferCalculateView(APIView):
             return Response(
                 {
                     "success": False,
-                    "error": {"code": "VALIDATION_ERROR", "details": req_serializer.errors},
+                    "error": {
+                        "code": "VALIDATION_ERROR",
+                        "details": req_serializer.errors,
+                    },
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
         offer_id = req_serializer.validated_data["offer_id"]
-        base_price: Decimal = req_serializer.validated_data["base_price"]
+        catalog_item_id = req_serializer.validated_data.get("catalog_item_id")
+        provided_base_price: Decimal | None = req_serializer.validated_data.get("base_price")
 
         try:
-            offer = OfferSpecification.objects.get(id=offer_id, is_active=True)
+            offer = OfferSpecification.objects.select_related(
+                "merchant", "outlet", "catalog_item"
+            ).get(id=offer_id)
         except OfferSpecification.DoesNotExist:
             return Response(
                 {
                     "success": False,
                     "error": {
                         "code": "NOT_FOUND",
-                        "message": "Active offer specification not found.",
+                        "message": "Offer specification not found.",
                     },
                 },
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        discount_amount, final_price = calculate_discounted_price(base_price, offer)
-
-        savings_percentage = Decimal("0.00")
-        if base_price > Decimal("0.00"):
-            savings_percentage = ((discount_amount / base_price) * Decimal("100.00")).quantize(
-                Decimal("0.01")
+        now = timezone.now()
+        if not offer.is_active:
+            return Response(
+                {
+                    "success": False,
+                    "error": {
+                        "code": "OFFER_INACTIVE",
+                        "message": "The requested offer is not currently active.",
+                    },
+                },
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
-        data = {
-            "base_price": base_price,
-            "discount_amount": discount_amount,
-            "final_price": final_price,
-            "savings_percentage": savings_percentage,
+        if now < offer.valid_from or now > offer.valid_to:
+            return Response(
+                {
+                    "success": False,
+                    "error": {
+                        "code": "OFFER_EXPIRED",
+                        "message": "The requested offer is not valid at the current time.",
+                    },
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Authoritative resolution of base price and currency
+        authoritative_price: Decimal
+        currency: str
+        resolved_item_id: UUID | None = None
+
+        if offer.catalog_item is not None:
+            item = offer.catalog_item
+            if not item.is_active:
+                return Response(
+                    {
+                        "success": False,
+                        "error": {
+                            "code": "ITEM_INACTIVE",
+                            "message": "The catalog item bound to this offer is not active.",
+                        },
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            if catalog_item_id and catalog_item_id != item.id:
+                return Response(
+                    {
+                        "success": False,
+                        "error": {
+                            "code": "ITEM_OFFER_MISMATCH",
+                            "message": "Supplied catalog_item_id does not match the item bound to this offer.",
+                        },
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            if provided_base_price is not None and provided_base_price != item.base_price:
+                return Response(
+                    {
+                        "success": False,
+                        "error": {
+                            "code": "PRICE_MISMATCH",
+                            "message": (
+                                f"Provided base price ({provided_base_price}) contradicts the "
+                                f"authoritative catalog item base price ({item.base_price})."
+                            ),
+                        },
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            authoritative_price = item.base_price
+            currency = item.currency
+            resolved_item_id = item.id
+        else:
+            # Unbound offer (merchant or outlet level)
+            if catalog_item_id:
+                try:
+                    item = CatalogItem.objects.get(
+                        id=catalog_item_id, merchant_id=offer.merchant_id
+                    )
+                except CatalogItem.DoesNotExist:
+                    return Response(
+                        {
+                            "success": False,
+                            "error": {
+                                "code": "NOT_FOUND",
+                                "message": "Catalog item not found or does not belong to the offer's merchant organization.",
+                            },
+                        },
+                        status=status.HTTP_404_NOT_FOUND,
+                    )
+
+                if not item.is_active:
+                    return Response(
+                        {
+                            "success": False,
+                            "error": {
+                                "code": "ITEM_INACTIVE",
+                                "message": "The specified catalog item is not active.",
+                            },
+                        },
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+
+                if provided_base_price is not None and provided_base_price != item.base_price:
+                    return Response(
+                        {
+                            "success": False,
+                            "error": {
+                                "code": "PRICE_MISMATCH",
+                                "message": (
+                                    f"Provided base price ({provided_base_price}) contradicts the "
+                                    f"item base price ({item.base_price})."
+                                ),
+                            },
+                        },
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+
+                authoritative_price = item.base_price
+                currency = item.currency
+                resolved_item_id = item.id
+            elif provided_base_price is not None:
+                authoritative_price = provided_base_price
+                currency = offer.currency
+            else:
+                return Response(
+                    {
+                        "success": False,
+                        "error": {
+                            "code": "VALIDATION_ERROR",
+                            "message": "Either catalog_item_id or base_price must be provided for un-bound offers.",
+                        },
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        try:
+            result = calculate_discounted_price(authoritative_price, offer, currency=currency)
+        except ValueError as err:
+            return Response(
+                {
+                    "success": False,
+                    "error": {
+                        "code": "CURRENCY_MISMATCH",
+                        "message": str(err),
+                    },
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        response_data = {
+            "offer_id": offer.id,
+            "catalog_item_id": resolved_item_id,
+            **result.to_dict(),
         }
-        res_serializer = OfferCalculationResponseSerializer(data)
+        res_serializer = OfferCalculationResponseSerializer(response_data)
         return Response({"success": True, "data": res_serializer.data}, status=status.HTTP_200_OK)

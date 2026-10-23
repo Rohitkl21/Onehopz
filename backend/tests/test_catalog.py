@@ -3,13 +3,12 @@
 from decimal import Decimal
 
 import pytest
-from django.contrib.auth import get_user_model
 from django.test import Client
 from rest_framework import status
 
 from apps.catalog.models import CatalogItem
 from apps.catalog.registry import CategoryRegistry
-from apps.identity.models import UserRole
+from apps.identity.models import User, UserRole
 from apps.identity.services import AuthService
 from apps.merchants.models import (
     Merchant,
@@ -18,8 +17,7 @@ from apps.merchants.models import (
     Outlet,
     OutletCategory,
 )
-
-User = get_user_model()
+from apps.offers.models import OfferSpecification, OfferType
 
 
 @pytest.fixture
@@ -55,6 +53,18 @@ def regular_customer(db: None) -> User:
         first_name="Shopper",
         last_name="One",
         role=UserRole.CUSTOMER,
+    )
+
+
+@pytest.fixture
+def platform_admin(db: None) -> User:
+    return User.objects.create_user(
+        email="admin@example.com",
+        phone_number="+919111111104",
+        password="Password#2026",
+        first_name="Platform",
+        last_name="Admin",
+        role=UserRole.SUPER_ADMIN,
     )
 
 
@@ -137,7 +147,6 @@ def test_category_registry_covers_all_seven_verticals() -> None:
     }
     assert cat_keys == expected
 
-    # Verify specific capability flags
     cinema_cap = CategoryRegistry.get_capabilities(OutletCategory.CINEMA)
     assert cinema_cap is not None
     assert cinema_cap.has_seat_map is True
@@ -241,7 +250,7 @@ def test_cross_tenant_outlet_association_rejected(
     client = Client()
     payload = {
         "merchant": str(merchant_a.id),
-        "outlet": str(outlet_b.id),  # Belongs to merchant_b
+        "outlet": str(outlet_b.id),
         "category": OutletCategory.CINEMA,
         "title": "Cross Tenant Attempt",
         "base_price": "200.00",
@@ -282,17 +291,26 @@ def test_negative_base_price_rejected(
 
 
 @pytest.mark.django_db
-def test_catalog_item_update_and_delete(
+def test_catalog_item_update_and_logical_deletion(
     merchant_owner: User,
     other_merchant_owner: User,
     merchant_a: Merchant,
 ) -> None:
-    """Catalog item can be updated and deleted by owner, but not by unauthorized competitor."""
+    """Catalog item is logically deactivated upon DELETE, keeping DB row and linked offers."""
     item = CatalogItem.objects.create(
         merchant=merchant_a,
         category=OutletCategory.CINEMA,
         title="Original Movie",
         base_price=Decimal("300.00"),
+    )
+    offer = OfferSpecification.objects.create(
+        merchant=merchant_a,
+        catalog_item=item,
+        title="Movie 10% Off",
+        offer_type=OfferType.PERCENTAGE,
+        discount_value=Decimal("10.00"),
+        valid_from="2026-10-01T00:00:00Z",
+        valid_to="2026-10-31T23:59:59Z",
     )
 
     client = Client()
@@ -317,50 +335,180 @@ def test_catalog_item_update_and_delete(
     assert Decimal(owner_res.json()["data"]["base_price"]) == Decimal("350.00")
     assert owner_res.json()["data"]["title"] == "Updated Movie Title"
 
-    # Owner delete succeeds
+    # Owner soft delete succeeds
     del_res = client.delete(
         f"/api/v1/catalog/items/{item.id}/",
         **auth_headers(merchant_owner),
     )
     assert del_res.status_code == status.HTTP_200_OK
-    assert not CatalogItem.objects.filter(id=item.id).exists()
+    assert del_res.json()["message"] == "Catalog item successfully deactivated."
+
+    # Row STILL exists in database, with is_active=False
+    refreshed_item = CatalogItem.objects.get(id=item.id)
+    assert refreshed_item.is_active is False
+
+    # Linked offer specification remains intact (NOT cascade deleted)
+    assert OfferSpecification.objects.filter(id=offer.id).exists()
+
+    # Repeated deactivation behaves predictably (idempotent 200 OK)
+    repeat_del = client.delete(
+        f"/api/v1/catalog/items/{item.id}/",
+        **auth_headers(merchant_owner),
+    )
+    assert repeat_del.status_code == status.HTTP_200_OK
+
+    # Deactivated item does NOT appear in public active listings
+    public_res = client.get("/api/v1/catalog/items/")
+    active_ids = [i["id"] for i in public_res.json()["data"]]
+    assert str(item.id) not in active_ids
 
 
 @pytest.mark.django_db
-def test_catalog_filtering(merchant_a: Merchant, merchant_b: Merchant) -> None:
-    """Filtering catalog items by merchant_id and category."""
+def test_catalog_visibility_anonymous_cannot_query_inactive(
+    merchant_a: Merchant,
+) -> None:
+    """Anonymous user querying ?is_active=false receives 403 Forbidden."""
     CatalogItem.objects.create(
         merchant=merchant_a,
         category=OutletCategory.CINEMA,
-        title="Cinema Item A",
+        title="Inactive Movie",
         base_price=Decimal("200.00"),
+        is_active=False,
     )
+    client = Client()
+    res = client.get("/api/v1/catalog/items/?is_active=false")
+    assert res.status_code == status.HTTP_403_FORBIDDEN
+    assert res.json()["error"]["code"] == "FORBIDDEN"
+
+
+@pytest.mark.django_db
+def test_catalog_visibility_invalid_boolean_param_returns_400() -> None:
+    """Supplying a malformed boolean filter for is_active returns 400 Bad Request."""
+    client = Client()
+    res = client.get("/api/v1/catalog/items/?is_active=notabool")
+    assert res.status_code == status.HTTP_400_BAD_REQUEST
+    assert res.json()["error"]["code"] == "VALIDATION_ERROR"
+
+
+@pytest.mark.django_db
+def test_catalog_visibility_customer_cannot_query_inactive(
+    regular_customer: User,
+    merchant_a: Merchant,
+) -> None:
+    """Ordinary authenticated customer querying ?is_active=false receives 403 Forbidden."""
+    client = Client()
+    res = client.get("/api/v1/catalog/items/?is_active=false", **auth_headers(regular_customer))
+    assert res.status_code == status.HTTP_403_FORBIDDEN
+    assert res.json()["error"]["code"] == "FORBIDDEN"
+
+
+@pytest.mark.django_db
+def test_catalog_visibility_cross_tenant_merchant_cannot_query_inactive(
+    merchant_owner: User,
+    merchant_b: Merchant,
+) -> None:
+    """Merchant A owner cannot query competitor Merchant B's inactive catalog items."""
+    CatalogItem.objects.create(
+        merchant=merchant_b,
+        category=OutletCategory.CINEMA,
+        title="Competitor Secret Draft",
+        base_price=Decimal("500.00"),
+        is_active=False,
+    )
+    client = Client()
+    res = client.get(
+        f"/api/v1/catalog/items/?merchant_id={merchant_b.id}&is_active=false",
+        **auth_headers(merchant_owner),
+    )
+    assert res.status_code == status.HTTP_403_FORBIDDEN
+
+
+@pytest.mark.django_db
+def test_catalog_visibility_merchant_omitted_param_scoped_to_own_merchants(
+    merchant_owner: User,
+    merchant_a: Merchant,
+    merchant_b: Merchant,
+) -> None:
+    """Merchant A querying management view without merchant_id receives only their own items."""
     CatalogItem.objects.create(
         merchant=merchant_a,
-        category=OutletCategory.RESTAURANT,
-        title="Buffet Dinner A",
-        base_price=Decimal("800.00"),
+        category=OutletCategory.CINEMA,
+        title="Merchant A Inactive Item",
+        base_price=Decimal("200.00"),
+        is_active=False,
     )
     CatalogItem.objects.create(
         merchant=merchant_b,
         category=OutletCategory.CINEMA,
-        title="Cinema Item B",
-        base_price=Decimal("250.00"),
+        title="Merchant B Inactive Item",
+        base_price=Decimal("300.00"),
+        is_active=False,
     )
 
     client = Client()
+    res = client.get("/api/v1/catalog/items/?is_active=false", **auth_headers(merchant_owner))
+    assert res.status_code == status.HTTP_200_OK
+    items = res.json()["data"]
+    # Should only contain Merchant A items, never Merchant B items
+    item_titles = [i["title"] for i in items]
+    assert "Merchant A Inactive Item" in item_titles
+    assert "Merchant B Inactive Item" not in item_titles
 
-    # Filter by merchant_a
-    res_a = client.get(f"/api/v1/catalog/items/?merchant_id={merchant_a.id}")
-    assert res_a.status_code == status.HTTP_200_OK
-    items_a = res_a.json()["data"]
-    assert len(items_a) == 2
 
-    # Filter by merchant_a and category RESTAURANT
-    res_restaurant = client.get(
-        f"/api/v1/catalog/items/?merchant_id={merchant_a.id}&category=RESTAURANT"
+@pytest.mark.django_db
+def test_catalog_visibility_platform_admin_can_query_all_inactive(
+    platform_admin: User,
+    merchant_a: Merchant,
+    merchant_b: Merchant,
+) -> None:
+    """Platform administrator can view inactive items across all merchant organizations."""
+    CatalogItem.objects.create(
+        merchant=merchant_a,
+        category=OutletCategory.CINEMA,
+        title="Alpha Draft",
+        base_price=Decimal("150.00"),
+        is_active=False,
     )
-    assert res_restaurant.status_code == status.HTTP_200_OK
-    restaurant_items = res_restaurant.json()["data"]
-    assert len(restaurant_items) == 1
-    assert restaurant_items[0]["title"] == "Buffet Dinner A"
+    CatalogItem.objects.create(
+        merchant=merchant_b,
+        category=OutletCategory.HOTEL,
+        title="Beta Draft Suite",
+        base_price=Decimal("3500.00"),
+        is_active=False,
+    )
+    client = Client()
+    res = client.get("/api/v1/catalog/items/?is_active=false", **auth_headers(platform_admin))
+    assert res.status_code == status.HTTP_200_OK
+    titles = [i["title"] for i in res.json()["data"]]
+    assert "Alpha Draft" in titles
+    assert "Beta Draft Suite" in titles
+
+
+@pytest.mark.django_db
+def test_catalog_inactive_item_detail_view_permissions(
+    merchant_owner: User,
+    regular_customer: User,
+    merchant_a: Merchant,
+) -> None:
+    """Inactive catalog item detail view returns 404 for customers, 200 for merchant owner."""
+    item = CatalogItem.objects.create(
+        merchant=merchant_a,
+        category=OutletCategory.CINEMA,
+        title="Private Item",
+        base_price=Decimal("250.00"),
+        is_active=False,
+    )
+    client = Client()
+
+    # Anonymous user gets 404
+    anon_res = client.get(f"/api/v1/catalog/items/{item.id}/")
+    assert anon_res.status_code == status.HTTP_404_NOT_FOUND
+
+    # Customer gets 404
+    cust_res = client.get(f"/api/v1/catalog/items/{item.id}/", **auth_headers(regular_customer))
+    assert cust_res.status_code == status.HTTP_404_NOT_FOUND
+
+    # Merchant owner gets 200 OK
+    owner_res = client.get(f"/api/v1/catalog/items/{item.id}/", **auth_headers(merchant_owner))
+    assert owner_res.status_code == status.HTTP_200_OK
+    assert owner_res.json()["data"]["title"] == "Private Item"

@@ -150,3 +150,22 @@ Payment gateways (Cashfree, Razorpay) deliver asynchronous event notifications t
 6. **Authentication Rate Limiting**:
    - Django REST Framework `ScopedRateThrottle` protects `/api/v1/auth/login` (10/min), `/api/v1/auth/register` (10/min), and `/api/v1/auth/refresh` (30/min).
    - In production, throttling state is maintained in Redis; in development/testing without Redis, it cleanly falls back to `LocMemCache`.
+
+
+## 7. Authoritative Hold Engine Security & Anti-Fraud Controls (Milestone 1.6)
+
+1. **Strict Customer Ownership & Isolation**:
+   - Every ephemeral hold is anchored to `customer_id == request.user.id`.
+   - Access to `/api/v1/holds/{id}/` and `/api/v1/holds/{id}/release/` strictly validates ownership. Attempting to view or release another customer's hold returns `403 Forbidden` (`PERMISSION_DENIED`).
+2. **Authoritative Server-Side Pricing Resolution**:
+   - The hold engine computes unit and total pricing strictly from verified, active `CatalogItem.base_price` and valid `OfferSpecification` rules (`apps.offers.services.calculate_discounted_price`).
+   - Client-supplied prices, totals, or currencies are discarded, preventing client price tampering and currency arbitrage.
+3. **Cryptographic Idempotency Fingerprinting**:
+   - Each hold request computes a canonical SHA-256 fingerprint from `customer_id`, `catalog_item_id`, `category`, `selection_parameters`, and `quantity`.
+   - The composite `(customer, idempotency_key)` is guarded by a PostgreSQL `UniqueConstraint`.
+   - If an idempotency key is re-submitted with different parameters, the request is rejected with `409 Conflict` (`IDEMPOTENCY_CONFLICT`), preventing reuse attacks or accidental misallocations.
+4. **PostgreSQL-Enforced Expiration & Zero Stale Usage**:
+   - Holds enforce database-level check constraint `chk_hold_expires_after_held` (`expires_at > held_at`).
+   - Any query or order conversion checks `expires_at > CLOCK_TIMESTAMP()`. Expired holds cannot be converted to orders or prevent subsequent customer allocations even if background workers are paused or delayed.
+5. **Double-Release Protection**:
+   - Releasing an already-released or expired hold is strictly idempotent. The operation returns `200 OK` with `status: "RELEASED_BY_USER"` without double-decrementing batch counters or corrupting quota tables.

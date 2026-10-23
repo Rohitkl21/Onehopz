@@ -60,6 +60,7 @@ INSTALLED_APPS = [
     "apps.catalog.apps.CatalogConfig",
     "apps.offers.apps.OffersConfig",
     "apps.inventory.apps.InventoryConfig",
+    "apps.holds.apps.HoldsConfig",
 ]
 
 AUTH_USER_MODEL = "identity.User"

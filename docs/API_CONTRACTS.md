@@ -466,7 +466,7 @@ All state-modifying `POST`, `PUT`, or `PATCH` endpoints that trigger financial t
 ```
 
 ### 5.2 Release Ephemeral Hold
-- **Endpoint**: `DELETE /api/v1/holds/{hold_id}`
+- **Endpoint**: `DELETE /api/v1/holds/{hold_id}` (Alias: `POST /api/v1/holds/{hold_id}/release/`)
 - **Auth**: Required (`CUSTOMER` owning the hold)
 - **Response (200 OK)**:
 ```json
@@ -478,6 +478,37 @@ All state-modifying `POST`, `PUT`, or `PATCH` endpoints that trigger financial t
   }
 }
 ```
+
+### 5.3 Retrieve Ephemeral Hold
+- **Endpoint**: `GET /api/v1/holds/{hold_id}`
+- **Auth**: Required (`CUSTOMER` owning the hold)
+- **Response (200 OK)**:
+```json
+{
+  "success": true,
+  "data": {
+    "hold_id": "410887e5-1813-4458-9ffb-365eef8b54b1",
+    "category": "CINEMA",
+    "status": "ACTIVE",
+    "held_at": "2026-10-23T15:05:00Z",
+    "expires_at": "2026-10-23T15:15:00Z",
+    "ttl_remaining_seconds": 600,
+    "locked_units": ["E-10", "E-11"],
+    "total_price": "700.00",
+    "currency": "INR",
+    "is_expired": false,
+    "lock_reference": "CINEMA:97d39ca2-7ff4-4ff9-8ff7-66a1c1c1f592:E-10,E-11",
+    "is_demo": false
+  }
+}
+```
+
+### 5.4 Idempotency & Concurrency Error Semantics
+- **Duplicate Key with Same Request Payload**: Returns original hold (HTTP 200 OK if active).
+- **Duplicate Key with Mismatched Payload**: Returns HTTP 409 Conflict with `code: "IDEMPOTENCY_CONFLICT"`.
+- **Double Release / Re-release**: Idempotently returns HTTP 200 OK with `status: "RELEASED_BY_USER"` without releasing or double-decrementing inventory.
+- **Authoritative Expiry**: At query time, `expires_at <= NOW()` transitions hold authoritatively to `EXPIRED` even if background sweep worker has not run.
+
 
 ---
 

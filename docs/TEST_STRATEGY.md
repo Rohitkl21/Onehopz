@@ -171,6 +171,20 @@ def test_concurrent_hotel_multi_night_hold():
 
 ---
 
+### 4.1 Milestone 1.6 ACID Concurrency Test Verification Matrix
+The following PostgreSQL concurrency tests in `backend/tests/test_holds_concurrency.py` and lifecycle tests in `backend/tests/test_holds_lifecycle.py` execute against live PostgreSQL 16.4 with independent database connections, barriers, and transactional workers:
+
+1. **TC-CONC-01 (Cinema Exclusive Seat)**: Two threads simultaneously claim seat `C-7`. Exactly 1 thread receives 201 Created; competing thread receives 409 Conflict (`INVENTORY_ALREADY_LOCKED`).
+2. **TC-CONC-02 (Surplus Food Quota Race)**: 5 concurrent threads attempt to claim 2 units each on a batch of 5 units (demand = 10). Exactly 2 threads succeed (4 held); 3 threads rejected with `INSUFFICIENT_INVENTORY`. `held_quantity` never breaches capacity.
+3. **TC-CONC-03 (Event Ticket Quota Race)**: 6 concurrent threads compete for 3 tickets in `EventTier`. Exactly 3 succeed; 3 rejected with `INSUFFICIENT_INVENTORY`. `held_tickets` equals 3.
+4. **TC-CONC-04 (Hotel Multi-Night Chronological Locking)**: 2 threads compete for overlapping 2-night stay on a room type with 1 room available. Exactly 1 succeeds; 1 fails. Deterministic stay-date sorting prevents database deadlocks.
+5. **TC-CONC-05 (Idempotent Duplicate Burst)**: 4 concurrent threads fire the identical payload and `Idempotency-Key`. All receive the exact same `hold_id`; total inventory decrement is strictly 1.
+6. **TC-CONC-06 (Release vs. Expiration Sweep Race)**: User release and background sweep race to release the same expired hold. Inventory held units decrement to 0 and are never double-released or negative.
+7. **TC-CONC-07 (Forced Exception Rollback)**: Transactional failure during hold acquisition completely rolls back allocations and hold creation, leaving 0 orphaned rows.
+8. **TC-CONC-08 (Authoritative Timestamp Expiry)**: Hold past `expires_at` is immediately evaluated as `EXPIRED` upon query even without background sweep; seat is reclaimed safely by another user.
+
+---
+
 ## 5. Demonstration vs. Live Integration Testing
 
 ```

@@ -128,3 +128,25 @@ Payment gateways (Cashfree, Razorpay) deliver asynchronous event notifications t
    - Personal identification data (`users.email`, `users.phone_number`, `users.first_name`, `users.last_name`) is anonymized/pseudonymized (`deleted_user_c1f7a220@redacted.onehopz.internal`).
    - Transactional, order, and tax records are retained in an immutable, pseudonymized state to satisfy statutory requirements under Indian tax laws (which require 8 years of ledger retention).
 3. **Auditability**: Every administrative lookup of customer PII is recorded in `audit_events` with staff user ID and justification reason.
+
+---
+
+## 6. Token Concurrency, CSRF Defense & PII Protection Controls (Milestone 1.4.1 Hardening)
+
+1. **Atomic Refresh Token Rotation & Concurrency Defense**:
+   - `AuthService.rotate_refresh_token` executes within `transaction.atomic()` using `select_for_update()` row-level locking.
+   - Prevents Time-of-Check to Time-of-Use (TOCTOU) race conditions where concurrent requests with the same token could otherwise issue multiple replacement tokens.
+   - **Committed Cascade Revocation**: When replay of a revoked token is detected, all active refresh tokens for that user are revoked and committed inside the database transaction *prior* to raising `TokenReuseError`. This guarantees revocation is not rolled back by the exception.
+2. **Refresh Token Transport Isolation**:
+   - Web browser clients utilize secure `HttpOnly`, `SameSite=Strict` cookies scoped to `/api/v1/auth/`.
+   - Raw refresh tokens are strictly omitted from browser-facing response JSON payloads, eliminating token exfiltration vectors via Cross-Site Scripting (XSS).
+3. **Cookie-Authenticated CSRF & Origin Defense**:
+   - Cookie-authenticated refresh and logout operations enforce strict Origin and Referer validation against configured `CORS_ALLOWED_ORIGINS`.
+   - Mismatched origins are rejected with `403 Forbidden` (`CSRF_FAILED`).
+4. **Role-Conditioned Compliance PII Masking**:
+   - Sensitive tax and statutory identifiers (`pan`, `gstin`) in `MerchantSerializer` are dynamically masked (e.g. `XXXXX1234F`) for users holding operational `STAFF` roles. Full unmasked values are restricted to `OWNER`, `ADMIN`, `FINANCE`, and platform administrators.
+5. **Database-Level Case-Insensitive Email Uniqueness**:
+   - In addition to application-level lowercase normalization, a database-level functional unique constraint `models.UniqueConstraint(Lower('email'), name='unique_case_insensitive_email')` enforces uniqueness across case variations at the schema level.
+6. **Authentication Rate Limiting**:
+   - Django REST Framework `ScopedRateThrottle` protects `/api/v1/auth/login` (10/min), `/api/v1/auth/register` (10/min), and `/api/v1/auth/refresh` (30/min).
+   - In production, throttling state is maintained in Redis; in development/testing without Redis, it cleanly falls back to `LocMemCache`.

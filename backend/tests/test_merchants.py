@@ -294,3 +294,100 @@ def test_absence_of_secret_leakage(merchant_owner: User) -> None:
     assert "password" not in content.lower()
     assert "pbkdf2" not in content.lower()
     assert "SECRET_KEY" not in content
+
+
+@pytest.mark.django_db
+def test_compliance_data_masked_for_staff(merchant_owner: User, merchant_staff_user: User) -> None:
+    """TC-20: Sensitive PAN and GSTIN identifiers are masked for operational staff but visible in full for owner."""
+    merchant = Merchant.objects.create(
+        business_name="Compliance Secure Hotels",
+        legal_entity_name="Compliance Hospitality Ltd",
+        primary_contact=merchant_owner,
+        pan="ABCDE1234F",
+        gstin="29ABCDE1234F1Z5",
+    )
+    MerchantMembership.objects.create(
+        merchant=merchant, user=merchant_owner, role=MerchantMembershipRole.OWNER
+    )
+    MerchantMembership.objects.create(
+        merchant=merchant, user=merchant_staff_user, role=MerchantMembershipRole.STAFF
+    )
+
+    client = Client()
+
+    # Owner views merchant details -> unmasked
+    resp_owner = client.get(f"/api/v1/merchants/{merchant.id}", **auth_headers(merchant_owner))
+    assert resp_owner.status_code == status.HTTP_200_OK
+    owner_data = resp_owner.json()["data"]
+    assert owner_data["pan"] == "ABCDE1234F"
+    assert owner_data["gstin"] == "29ABCDE1234F1Z5"
+
+    # Staff views merchant details -> masked!
+    resp_staff = client.get(f"/api/v1/merchants/{merchant.id}", **auth_headers(merchant_staff_user))
+    assert resp_staff.status_code == status.HTTP_200_OK
+    staff_data = resp_staff.json()["data"]
+    assert staff_data["pan"] == "XXXXX1234F"
+    assert staff_data["pan"] != "ABCDE1234F"
+    assert staff_data["gstin"] == "29XXXXXXXXXXXZ5"
+    assert staff_data["gstin"] != "29ABCDE1234F1Z5"
+
+
+@pytest.mark.django_db
+def test_inactive_merchant_membership_blocked(
+    merchant_owner: User, merchant_staff_user: User
+) -> None:
+    """TC-21: Inactive merchant membership denies tenant access."""
+    merchant = Merchant.objects.create(
+        business_name="Active/Inactive Test Co",
+        legal_entity_name="Active/Inactive Test Ltd",
+        primary_contact=merchant_owner,
+    )
+    MerchantMembership.objects.create(
+        merchant=merchant, user=merchant_owner, role=MerchantMembershipRole.OWNER
+    )
+    MerchantMembership.objects.create(
+        merchant=merchant,
+        user=merchant_staff_user,
+        role=MerchantMembershipRole.STAFF,
+        is_active=False,  # Inactive membership!
+    )
+
+    client = Client()
+    # Inactive member tries to view merchant details
+    resp = client.get(f"/api/v1/merchants/{merchant.id}", **auth_headers(merchant_staff_user))
+    assert resp.status_code == status.HTTP_403_FORBIDDEN
+    assert resp.json()["error"]["code"] == "ACCESS_DENIED"
+
+
+@pytest.mark.django_db
+def test_inactive_outlet_staff_blocked(merchant_owner: User, merchant_staff_user: User) -> None:
+    """TC-22: Inactive outlet staff assignment denies venue access."""
+    merchant = Merchant.objects.create(
+        business_name="Outlet Access Test Co",
+        legal_entity_name="Outlet Access Ltd",
+        primary_contact=merchant_owner,
+    )
+    MerchantMembership.objects.create(
+        merchant=merchant, user=merchant_owner, role=MerchantMembershipRole.OWNER
+    )
+    outlet = Outlet.objects.create(
+        merchant=merchant,
+        name="Security Test Venue",
+        category=OutletCategory.CINEMA,
+        address_line_1="MG Road",
+        city="Bengaluru",
+        state="Karnataka",
+        postal_code="560001",
+    )
+    OutletStaff.objects.create(
+        outlet=outlet,
+        user=merchant_staff_user,
+        staff_role=StaffRole.SCANNER_OPERATOR,
+        is_active=False,  # Inactive staff!
+    )
+
+    client = Client()
+    # Inactive staff tries to view outlet details
+    resp = client.get(f"/api/v1/outlets/{outlet.id}", **auth_headers(merchant_staff_user))
+    assert resp.status_code == status.HTTP_403_FORBIDDEN
+    assert resp.json()["error"]["code"] == "ACCESS_DENIED"

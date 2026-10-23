@@ -124,6 +124,36 @@ All state-modifying `POST`, `PUT`, or `PATCH` endpoints that trigger financial t
 }
 ```
 
+### 2.3 Token Refresh
+- **Endpoint**: `POST /api/v1/auth/refresh`
+- **Auth**: HttpOnly `onehopz_refresh_token` cookie (or JSON body `refresh_token` for non-browser clients)
+- **Response (200 OK)**:
+```json
+{
+  "success": true,
+  "data": {
+    "access_token": "eyJhbGciOiJIUzI1NiIsIn...",
+    "token_type": "Bearer",
+    "expires_in_seconds": 900
+  }
+}
+```
+*(Single-use rotation: old token is revoked, new HttpOnly cookie is set. Raw refresh token is omitted from JSON response.)*
+
+### 2.4 User Logout
+- **Endpoint**: `POST /api/v1/auth/logout`
+- **Auth**: Public or HttpOnly Cookie
+- **Response (200 OK)**:
+```json
+{
+  "success": true,
+  "data": {
+    "message": "Logged out successfully."
+  }
+}
+```
+*(Atomically revokes refresh token in database and clears `onehopz_refresh_token` cookie.)*
+
 ---
 
 ## 3. Geographic & Catalog Discovery (`/api/v1/discovery`)

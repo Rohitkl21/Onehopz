@@ -1,6 +1,6 @@
 """Identity and authentication routes."""
 
-from django.urls import path
+from django.urls import re_path
 
 from .views import (
     CurrentUserProfileView,
@@ -13,9 +13,9 @@ from .views import (
 app_name = "identity"
 
 urlpatterns = [
-    path("register", RegistrationView.as_view(), name="register"),
-    path("login", LoginView.as_view(), name="login"),
-    path("refresh", TokenRefreshView.as_view(), name="refresh"),
-    path("logout", LogoutView.as_view(), name="logout"),
-    path("me", CurrentUserProfileView.as_view(), name="me"),
+    re_path(r"^register/?$", RegistrationView.as_view(), name="register"),
+    re_path(r"^login/?$", LoginView.as_view(), name="login"),
+    re_path(r"^refresh/?$", TokenRefreshView.as_view(), name="refresh"),
+    re_path(r"^logout/?$", LogoutView.as_view(), name="logout"),
+    re_path(r"^me/?$", CurrentUserProfileView.as_view(), name="me"),
 ]

@@ -54,6 +54,43 @@ class MerchantSerializer(serializers.ModelSerializer[Merchant]):
         )
         return merchant
 
+    def to_representation(self, instance: Merchant) -> dict[str, Any]:
+        data = super().to_representation(instance)
+        request = self.context.get("request")
+        user = getattr(request, "user", None) if request else None
+
+        has_compliance_access = False
+        if user and getattr(user, "is_authenticated", False):
+            if getattr(user, "is_platform_admin", False):
+                has_compliance_access = True
+            else:
+                membership = MerchantMembership.objects.filter(
+                    merchant=instance,
+                    user=user,
+                    is_active=True,
+                ).first()
+                if membership and membership.role in (
+                    MerchantMembershipRole.OWNER,
+                    MerchantMembershipRole.ADMIN,
+                    MerchantMembershipRole.FINANCE,
+                ):
+                    has_compliance_access = True
+
+        if not has_compliance_access:
+            # Mask sensitive tax compliance identifiers for operational STAFF or unprivileged roles
+            raw_pan = data.get("pan")
+            if raw_pan:
+                data["pan"] = f"XXXXX{raw_pan[-5:]}" if len(raw_pan) >= 5 else "XXXXX"
+            raw_gstin = data.get("gstin")
+            if raw_gstin:
+                data["gstin"] = (
+                    f"{raw_gstin[:2]}XXXXXXXXXXX{raw_gstin[-2:]}"
+                    if len(raw_gstin) >= 4
+                    else "XXXXXXXXXXXXXXX"
+                )
+
+        return data
+
 
 class MerchantMembershipSerializer(serializers.ModelSerializer[MerchantMembership]):
     """Serializer for managing team members within a merchant organization."""

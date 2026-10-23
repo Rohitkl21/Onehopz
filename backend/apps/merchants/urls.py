@@ -1,6 +1,6 @@
 """URL routing for Merchants, Outlets, and Staff management."""
 
-from django.urls import path
+from django.urls import re_path
 
 from .views import (
     MerchantDetailView,
@@ -13,15 +13,15 @@ app_name = "merchants"
 
 urlpatterns = [
     # Merchants
-    path("", MerchantListCreateView.as_view(), name="merchant-list-create"),
-    path("<uuid:pk>", MerchantDetailView.as_view(), name="merchant-detail"),
-    path(
-        "<uuid:merchant_id>/members",
+    re_path(r"^/?$", MerchantListCreateView.as_view(), name="merchant-list-create"),
+    re_path(r"^(?P<pk>[0-9a-f-]+)/?$", MerchantDetailView.as_view(), name="merchant-detail"),
+    re_path(
+        r"^(?P<merchant_id>[0-9a-f-]+)/members/?$",
         MerchantMembershipListCreateView.as_view(),
         name="merchant-members",
     ),
-    path(
-        "<uuid:merchant_id>/outlets",
+    re_path(
+        r"^(?P<merchant_id>[0-9a-f-]+)/outlets/?$",
         MerchantOutletListCreateView.as_view(),
         name="merchant-outlets",
     ),

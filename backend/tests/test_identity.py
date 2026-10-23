@@ -248,3 +248,124 @@ def test_anonymous_access_to_protected_endpoints(api_client: Client) -> None:
     """TC-12: Anonymous requests to protected endpoints return 401 Unauthorized."""
     response = api_client.get("/api/v1/auth/me")
     assert response.status_code == status.HTTP_401_UNAUTHORIZED
+
+
+@pytest.mark.django_db
+def test_privileged_role_registration_blocked(api_client: Client) -> None:
+    """TC-13: Public registration with privileged roles (SUPER_ADMIN, FINANCE_ADMIN, etc.) is rejected."""
+    for privileged_role in [
+        UserRole.SUPER_ADMIN,
+        UserRole.FINANCE_ADMIN,
+        UserRole.PLATFORM_SUPPORT,
+    ]:
+        payload = {
+            "email": f"attacker_{privileged_role.lower()}@example.com",
+            "phone_number": "+919800000001",
+            "password": "StrongPassword#2026",
+            "first_name": "Bad",
+            "last_name": "Actor",
+            "role": privileged_role,
+        }
+        response = api_client.post(
+            "/api/v1/auth/register", data=payload, content_type="application/json"
+        )
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert "Public registration permits only" in str(response.json()["error"])
+
+
+@pytest.mark.django_db
+def test_refresh_token_not_in_json_response(api_client: Client, registered_user: User) -> None:
+    """TC-14: Refresh response never exposes raw refresh token in JSON data to browser clients."""
+    _, raw_refresh_token = AuthService.issue_refresh_token(registered_user)
+    api_client.cookies["onehopz_refresh_token"] = raw_refresh_token
+
+    response = api_client.post("/api/v1/auth/refresh", data={}, content_type="application/json")
+    assert response.status_code == status.HTTP_200_OK
+    data = response.json()
+    assert "access_token" in data["data"]
+    # Refresh token must be absent from JSON body for cookie-based clients
+    assert "refresh_token" not in data["data"]
+    # But present in secure HttpOnly cookie
+    assert "onehopz_refresh_token" in response.cookies
+
+
+@pytest.mark.django_db
+def test_csrf_origin_validation_on_cookie_refresh(
+    api_client: Client, registered_user: User
+) -> None:
+    """TC-15: Cross-origin requests with cookie auth but mismatched Origin are rejected."""
+    _, raw_refresh_token = AuthService.issue_refresh_token(registered_user)
+    api_client.cookies["onehopz_refresh_token"] = raw_refresh_token
+
+    # Malicious external origin attempt
+    response = api_client.post(
+        "/api/v1/auth/refresh",
+        data={},
+        content_type="application/json",
+        HTTP_ORIGIN="https://evil-attacker.com",
+    )
+    assert response.status_code == status.HTTP_403_FORBIDDEN
+    assert response.json()["error"]["code"] == "CSRF_FAILED"
+
+
+@pytest.mark.django_db
+def test_url_trailing_slash_flexibility(registered_user: User) -> None:
+    """TC-16: API endpoints accept both trailing slash and non-trailing slash without 301 redirects."""
+    client = Client()
+    # Without slash
+    r1 = client.post(
+        "/api/v1/auth/login",
+        data={"email": registered_user.email, "password": "SecurePassword#2026"},
+        content_type="application/json",
+    )
+    assert r1.status_code == status.HTTP_200_OK
+
+    # With slash
+    r2 = client.post(
+        "/api/v1/auth/login/",
+        data={"email": registered_user.email, "password": "SecurePassword#2026"},
+        content_type="application/json",
+    )
+    assert r2.status_code == status.HTTP_200_OK
+
+
+@pytest.mark.django_db
+def test_case_insensitive_email_db_constraint(registered_user: User) -> None:
+    """TC-17: Case-insensitive email unique constraint prevents duplicate emails with different casing at DB level."""
+    from django.db import IntegrityError
+
+    # Attempt to insert same email in uppercase directly via model
+    with pytest.raises(IntegrityError):
+        User.objects.create(
+            email=registered_user.email.upper(),
+            phone_number="+919899999999",
+            password="AnyPassword#2026",
+            first_name="Duplicate",
+            last_name="Case",
+            role=UserRole.CUSTOMER,
+        )
+
+
+@pytest.mark.django_db
+def test_auth_throttling_on_login(registered_user: User) -> None:
+    """TC-18: Rapid consecutive authentication requests trigger DRF rate throttling."""
+    from django.core.cache import cache
+
+    cache.clear()
+    client = Client()
+
+    # Rate is configured to 10/minute for auth_login
+    hit_throttle = False
+    for _i in range(15):
+        resp = client.post(
+            "/api/v1/auth/login",
+            data={"email": "throttletest@example.com", "password": "WrongPassword#123"},
+            content_type="application/json",
+            REMOTE_ADDR="198.51.100.5",
+        )
+        if resp.status_code == status.HTTP_429_TOO_MANY_REQUESTS:
+            hit_throttle = True
+            break
+
+    assert hit_throttle is True
+    cache.clear()

@@ -7,6 +7,7 @@ from typing import Any
 from django.contrib.auth.base_user import BaseUserManager
 from django.contrib.auth.models import AbstractBaseUser, PermissionsMixin
 from django.db import models
+from django.db.models.functions import Lower
 
 
 class UserRole(models.TextChoices):
@@ -100,6 +101,12 @@ class User(AbstractBaseUser, PermissionsMixin):
             models.Index(fields=["email", "role"], name="idx_users_email_role"),
             models.Index(fields=["phone_number"], name="idx_users_phone"),
             models.Index(fields=["is_demo"], name="idx_users_is_demo"),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                Lower("email"),
+                name="unique_case_insensitive_email",
+            ),
         ]
 
     def __str__(self) -> str:

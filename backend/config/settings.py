@@ -85,6 +85,8 @@ MIDDLEWARE = [
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
 
+APPEND_SLASH = False
+
 ROOT_URLCONF = "config.urls"
 
 TEMPLATES = [
@@ -200,6 +202,17 @@ REST_FRAMEWORK: dict[str, Any] = {
     "DEFAULT_PERMISSION_CLASSES": [
         "rest_framework.permissions.IsAuthenticated",
     ],
+    "DEFAULT_THROTTLE_CLASSES": [
+        "rest_framework.throttling.AnonRateThrottle",
+        "rest_framework.throttling.UserRateThrottle",
+    ],
+    "DEFAULT_THROTTLE_RATES": {
+        "anon": "120/minute",
+        "user": "1000/minute",
+        "auth_login": "10/minute",
+        "auth_register": "10/minute",
+        "auth_refresh": "30/minute",
+    },
     "UNAUTHENTICATED_USER": None,
 }
 
@@ -221,12 +234,25 @@ CORS_ALLOW_CREDENTIALS = True
 
 # Redis and Ephemeral Cache Configuration
 REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
-CACHES = {
-    "default": {
-        "BACKEND": "django.core.cache.backends.redis.RedisCache",
-        "LOCATION": REDIS_URL,
+USE_REDIS = os.getenv(
+    "USE_REDIS", "false" if (IS_TESTING or not os.path.exists("/.dockerenv")) else "true"
+).lower() in ("true", "1", "yes")
+
+if USE_REDIS:
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.redis.RedisCache",
+            "LOCATION": REDIS_URL,
+        }
     }
-}
+else:
+    # Local development / host test runner fallback when Redis is not running
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+            "LOCATION": "onehopz-dev-cache",
+        }
+    }
 
 # Celery Configuration
 CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", "redis://redis:6379/1")

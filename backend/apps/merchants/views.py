@@ -91,7 +91,7 @@ class MerchantListCreateView(APIView):
             )
             merchants = Merchant.objects.filter(id__in=merchant_ids).order_by("-created_at")
 
-        serializer = MerchantSerializer(merchants, many=True)
+        serializer = MerchantSerializer(merchants, many=True, context={"request": request})
         return Response({"success": True, "data": serializer.data}, status=status.HTTP_200_OK)
 
     def post(self, request: Request) -> Response:
@@ -106,7 +106,10 @@ class MerchantListCreateView(APIView):
             )
         merchant = serializer.save()
         return Response(
-            {"success": True, "data": MerchantSerializer(merchant).data},
+            {
+                "success": True,
+                "data": MerchantSerializer(merchant, context={"request": request}).data,
+            },
             status=status.HTTP_201_CREATED,
         )
 
@@ -127,7 +130,10 @@ class MerchantDetailView(APIView):
                 status=status.HTTP_403_FORBIDDEN,
             )
         return Response(
-            {"success": True, "data": MerchantSerializer(merchant).data},
+            {
+                "success": True,
+                "data": MerchantSerializer(merchant, context={"request": request}).data,
+            },
             status=status.HTTP_200_OK,
         )
 

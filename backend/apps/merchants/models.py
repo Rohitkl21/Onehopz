@@ -16,6 +16,7 @@ class MerchantVerificationStatus(models.TextChoices):
 class MerchantMembershipRole(models.TextChoices):
     OWNER = "OWNER", "Owner"
     ADMIN = "ADMIN", "Admin"
+    FINANCE = "FINANCE", "Finance"
     STAFF = "STAFF", "Staff"
 
 

@@ -7,6 +7,7 @@ from typing import Any
 
 import jwt
 from django.conf import settings
+from django.db import transaction
 from django.utils import timezone as django_timezone
 
 from .models import RefreshToken, User
@@ -99,59 +100,79 @@ class AuthService:
         """
         Verify a raw refresh token, rotate it single-use, detect replay/reuse,
         and return (new_access_token, new_raw_refresh_token, user).
+
+        Guarantees:
+        - Atomic execution using select_for_update row-level locking.
+        - Concurrent requests cannot produce multiple replacements.
+        - Replay cascade revocation is committed before raising TokenReuseError.
         """
         token_hash = RefreshToken.hash_token(raw_refresh_token)
-        token_record = (
-            RefreshToken.objects.select_related("user").filter(token_hash=token_hash).first()
-        )
 
-        if not token_record:
-            raise InvalidTokenError("Invalid refresh token")
+        raise_reuse = False
+        raise_expired = False
+        raise_inactive = False
 
-        # Reuse Detection: If this token was already revoked, a replay attack is occurring!
-        if token_record.is_revoked:
-            # Revoke ALL existing active refresh tokens for this user immediately
-            RefreshToken.objects.filter(user=token_record.user, is_revoked=False).update(
-                is_revoked=True,
-                revoked_at=django_timezone.now(),
+        with transaction.atomic():
+            token_record = (
+                RefreshToken.objects.select_for_update()
+                .select_related("user")
+                .filter(token_hash=token_hash)
+                .first()
             )
+
+            if not token_record:
+                raise InvalidTokenError("Invalid refresh token")
+
+            if token_record.is_revoked:
+                # Token already revoked: replay detected!
+                raise_reuse = True
+                RefreshToken.objects.filter(user=token_record.user, is_revoked=False).update(
+                    is_revoked=True,
+                    revoked_at=django_timezone.now(),
+                )
+            elif token_record.expires_at < django_timezone.now():
+                token_record.is_revoked = True
+                token_record.revoked_at = django_timezone.now()
+                token_record.save(update_fields=["is_revoked", "revoked_at"])
+                raise_expired = True
+            elif not token_record.user.is_active:
+                raise_inactive = True
+            else:
+                user = token_record.user
+                token_record.is_revoked = True
+                token_record.revoked_at = django_timezone.now()
+
+                new_record, new_raw_token = cls.issue_refresh_token(user)
+                token_record.replaced_by_token = new_record
+                token_record.save(update_fields=["is_revoked", "revoked_at", "replaced_by_token"])
+
+                new_access_token = cls.create_access_token(user)
+
+        # Errors are raised OUTSIDE the atomic block so the revocation state changes are committed!
+        if raise_reuse:
             raise TokenReuseError(
                 "Refresh token reuse detected. All active sessions have been invalidated."
             )
-
-        # Expiry Check
-        if token_record.expires_at < django_timezone.now():
-            token_record.is_revoked = True
-            token_record.revoked_at = django_timezone.now()
-            token_record.save(update_fields=["is_revoked", "revoked_at"])
+        if raise_expired:
             raise ExpiredTokenError("Refresh token has expired")
-
-        user = token_record.user
-        if not user.is_active:
+        if raise_inactive:
             raise InvalidTokenError("User account is inactive")
-
-        # Mark current token revoked as part of rotation
-        token_record.is_revoked = True
-        token_record.revoked_at = django_timezone.now()
-
-        # Generate new replacement refresh token
-        new_record, new_raw_token = cls.issue_refresh_token(user)
-        token_record.replaced_by_token = new_record
-        token_record.save(update_fields=["is_revoked", "revoked_at", "replaced_by_token"])
-
-        # Generate new access token
-        new_access_token = cls.create_access_token(user)
 
         return new_access_token, new_raw_token, user
 
     @classmethod
     def revoke_refresh_token(cls, raw_refresh_token: str) -> bool:
-        """Revoke a refresh token on logout."""
+        """Revoke a refresh token on logout atomically."""
         token_hash = RefreshToken.hash_token(raw_refresh_token)
-        token_record = RefreshToken.objects.filter(token_hash=token_hash, is_revoked=False).first()
-        if token_record:
-            token_record.is_revoked = True
-            token_record.revoked_at = django_timezone.now()
-            token_record.save(update_fields=["is_revoked", "revoked_at"])
-            return True
+        with transaction.atomic():
+            token_record = (
+                RefreshToken.objects.select_for_update()
+                .filter(token_hash=token_hash, is_revoked=False)
+                .first()
+            )
+            if token_record:
+                token_record.is_revoked = True
+                token_record.revoked_at = django_timezone.now()
+                token_record.save(update_fields=["is_revoked", "revoked_at"])
+                return True
         return False
